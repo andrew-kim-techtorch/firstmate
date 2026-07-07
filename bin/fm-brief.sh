@@ -230,10 +230,12 @@ if [ "$MODE" != "local-only" ]; then
   PR_BODY_SECTION=$(cat <<'PRBODY'
 # PR body conventions
 Lead the PR body with what the change satisfies (the requirement being met), not a narrative of the work.
-For any UI-visible change, include before/after screenshots that render inline on GitHub.
-Commit screenshots under `docs/pr-screenshots/<task-id>/` and reference them by a permanent `raw.githubusercontent.com` URL, or upload them as GitHub attachment uploads.
+For any UI-visible change, include before/after screenshots that reviewers can access.
+Commit screenshots under `docs/pr-screenshots/<task-id>/` and reference them as clickable links to the committed file: `[Before](https://github.com/<org>/<repo>/blob/<default-branch>/docs/pr-screenshots/<task-id>/before.png)` - authenticated reviewers can open these.
+True inline rendering on a private repo requires uploading images as GitHub attachments (browser drag-drop; an autonomous agent cannot do this) - if inline rendering is wanted, flag it in the PR body so a human can upload them after review.
+Never use a `raw.githubusercontent.com` URL for screenshots - those do not render inline on private repos.
 Never reference a local filesystem path (`/var/folders`, `/private/tmp`, scratchpad, or `/Users/...`) - those paths render as nothing for reviewers.
-Present before/after screenshots side by side in a `| Before | After |` markdown table.
+Present before/after side by side in a `| Before | After |` markdown table.
 PRBODY
 )
 else

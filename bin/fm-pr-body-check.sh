@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# Check a PR body for local filesystem paths that will not render for reviewers,
-# and (with --ui) assert that the body contains at least one rendered image.
+# Check a PR body for screenshot references that will not render for reviewers,
+# and (with --ui) assert that the body contains at least one screenshot reference.
 # Firstmate runs this before relaying a PR as ready; the PR body conventions
 # in bin/fm-brief.sh's ship-brief scaffold are the one authoritative source of
 # what crewmates are expected to follow.
 # Usage: fm-pr-body-check.sh [--ui] <pr-url>
-#   --ui  also assert the body contains at least one rendered image (![...] or <img ...>)
+#   --ui  also assert the body contains at least one screenshot reference
+#         (inline GitHub attachment image, blob link to an image file, or <img> tag)
+# Always fails on: local filesystem paths, raw.githubusercontent.com image refs
+#   (raw URLs do not render inline on private repos).
 # Exit 0 on pass (one ok line to stdout); non-zero with a one-line reason to stderr on fail.
 set -eu
 
@@ -49,10 +52,20 @@ if printf '%s' "$BODY" | grep -qE "$LOCAL_PATH_PAT"; then
   exit 1
 fi
 
-# With --ui, fail if the body has no rendered images at all.
+# Fail if the body references raw.githubusercontent.com - those URLs do not render
+# inline on private repos (GitHub image proxy cannot authenticate to fetch them).
+if printf '%s' "$BODY" | grep -qF 'raw.githubusercontent.com'; then
+  printf 'error: PR body references raw.githubusercontent.com which does not render inline on private repos; use a blob link or GitHub attachment upload instead\n' >&2
+  exit 1
+fi
+
+# With --ui, fail if the body has no screenshot references at all.
+# Valid references: inline GitHub attachment images (![...](https://...githubusercontent.com/...)),
+# blob links to image files (https://github.com/.../blob/.../file.png), or <img> tags.
 if [ "$UI" = 1 ]; then
-  if ! printf '%s' "$BODY" | grep -qE '!\[.*\]\(|<img '; then
-    printf 'error: PR body has no rendered images (--ui requires before/after screenshots)\n' >&2
+  SCREENSHOT_PAT='(!\[.*\]\(|<img |github\.com/[^)]+/blob/[^)]+\.(png|jpg|jpeg|gif|svg))'
+  if ! printf '%s' "$BODY" | grep -qE "$SCREENSHOT_PAT"; then
+    printf 'error: PR body has no screenshot references (--ui requires before/after screenshots as blob links or GitHub attachment uploads)\n' >&2
     exit 1
   fi
 fi
