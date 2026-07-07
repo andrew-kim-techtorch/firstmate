@@ -225,6 +225,23 @@ EOF
     ;;
 esac
 
+# PR body conventions block for PR-based ship modes; omitted for local-only (no PR).
+if [ "$MODE" != "local-only" ]; then
+  PR_BODY_SECTION=$(cat <<'PRBODY'
+# PR body conventions
+Lead the PR body with what the change satisfies (the requirement being met), not a narrative of the work.
+For any UI-visible change, include before/after screenshots that render inline on GitHub.
+Commit screenshot PNG files under `docs/pr-screenshots/<task-id>/` and reference them inline using `https://github.com/<owner>/<repo>/raw/<commit-sha>/<path>` URLs, where `<commit-sha>` is the sha of the commit that added the screenshots on your branch.
+These URLs render inline for authenticated repo members during PR review and continue to resolve after a squash-merge because they reference the commit sha directly.
+Never use a `raw.githubusercontent.com` URL for screenshots - those return 404 on private repos.
+Never reference a local filesystem path (`/var/folders`, `/private/tmp`, scratchpad, or `/Users/...`) - those paths render as nothing for reviewers.
+Present before/after screenshots side by side in a `| Before | After |` markdown table.
+PRBODY
+)
+else
+  PR_BODY_SECTION=""
+fi
+
 cat > "$BRIEF" <<EOF
 You are a crewmate: an autonomous worker agent managed by firstmate. Work on your own; do not wait for a human.
 
@@ -261,6 +278,8 @@ Record only project knowledge useful to almost every future session.
 For anything the codebase already shows, prefer a pointer to the authoritative file, command, or doc over copying the detail.
 If you touch a project \`AGENTS.md\` that lacks \`## Maintaining this file\`, add that short self-governance section from \`$FM_ROOT/bin/fm-ensure-agents-md.sh\` in the same pass.
 Keep it proportionate: skip \`AGENTS.md\` edits for trivial tasks that produced no durable project knowledge.
+
+$PR_BODY_SECTION
 
 $DOD
 EOF

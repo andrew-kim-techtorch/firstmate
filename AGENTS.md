@@ -574,6 +574,7 @@ During the `ci` monitor phase, `bin/fm-crew-state.sh` also reads the ci step log
 
 For PR-based ship tasks, the ready signal depends on mode: `no-mistakes` reports `done: PR <url> checks green` after CI is green, while `direct-PR` reports `done: PR <url>` after opening the PR.
 Run `bin/fm-pr-check.sh <id> <PR url>` - it records `pr=` and GitHub's `pr_head=` when available in the task's meta and arms the watcher's merge poll.
+Run `bin/fm-pr-body-check.sh <PR url>` (add `--ui` for any UI-visible change) before relaying the PR; the PR body conventions in the brief scaffold (`bin/fm-brief.sh`) define what it checks.
 Tell the captain: the PR's full URL (always the complete `https://...` link, never a bare `#number` - the captain's terminal makes a full URL clickable), a one-paragraph summary, and, for `no-mistakes`, the risk level it emitted.
 (The check contract, for any custom `state/<id>.check.sh` you write yourself: print one line only when firstmate should wake, print nothing otherwise, and finish before `FM_CHECK_TIMEOUT`.)
 
@@ -834,6 +835,7 @@ For a ship task the definition of done is shaped by the project's delivery mode 
 The no-mistakes brief points to no-mistakes' version-matched guidance and keeps only firstmate-specific wrapper rules for `ask-user` escalation, `--yes` avoidance, and the CI-green done line.
 The scaffold reads the mode via `fm-project-mode.sh`, so you do not pass it.
 Ship briefs also include the project-memory contract: run `bin/fm-ensure-agents-md.sh` when the project already has agent-memory files or when the task produced durable project-intrinsic knowledge, then record proportionate learnings in `AGENTS.md`.
+PR-based ship briefs (`no-mistakes` and `direct-PR`, not `local-only`) also carry the PR body conventions the crewmate follows and `bin/fm-pr-body-check.sh` verifies: lead with the requirement satisfied, use inline-rendering GitHub attachment URLs for any UI-visible before/after screenshots, commit the source PNGs under `docs/pr-screenshots/<task-id>/`, and never reference `raw.githubusercontent.com` or local filesystem paths.
 For scout tasks add `--scout`: the scaffold swaps the definition of done for the report contract (findings to `data/<id>/report.md`, no branch, no push, no PR) and declares the worktree scratch; scout is mode-agnostic.
 Scout briefs do not include the project-memory step, because their deliverable is a report rather than a committed project change.
 For secondmates use `bin/fm-brief.sh <id> --secondmate <project>...`.
