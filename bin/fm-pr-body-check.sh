@@ -81,4 +81,12 @@ if [ "$UI" = 1 ]; then
   fi
 fi
 
+# Lenient warning: flag a body with no thread link at all.
+# A genuinely standalone first-of-its-kind PR has no parent, so this exits 0.
+# The goal is to catch the common miss - a follow-on that forgot to link.
+THREAD_PAT='#[0-9]|Part of|Follow-on to|Fixes'
+if ! printf '%s' "$BODY" | grep -qE "$THREAD_PAT"; then
+  printf 'warning: PR body has no thread link; add "Follow-on to #N", "Part of #N", or "Fixes #N" for follow-on and workstream PRs\n' >&2
+fi
+
 printf 'ok: PR body passes checks\n'
