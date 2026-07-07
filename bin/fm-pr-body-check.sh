@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 # Check a PR body for screenshot references that will not render for reviewers,
-# and (with --ui) assert that the body contains at least one GitHub attachment image.
+# and (with --ui) assert that the body contains at least one inline image URL.
 # Firstmate runs this before relaying a PR as ready; the PR body conventions
 # in bin/fm-brief.sh's ship-brief scaffold are the one authoritative source of
 # what crewmates are expected to follow.
 # Usage: fm-pr-body-check.sh [--ui] <pr-url>
-#   --ui  also assert the body contains at least one GitHub attachment image URL
-#         (github.com/user-attachments/assets/... or github.com/<owner>/<repo>/assets/...).
-#         Blob links (github.com/.../blob/...) are click-through only and do NOT satisfy
-#         this requirement.
+#   --ui  also assert the body contains at least one inline image URL.
+#         Accepted inline URL forms:
+#           github.com/<owner>/<repo>/raw/<sha>/<path>  (commit-sha raw URLs render on private repos)
+#           github.com/user-attachments/assets/...      (GitHub attachment)
+#           github.com/<owner>/<repo>/assets/...        (GitHub attachment, legacy form)
+#         Blob links (github.com/.../blob/...) are click-through only and do NOT satisfy this.
 # Always fails on: local filesystem paths, raw.githubusercontent.com refs
-#   (raw URLs do not render inline on private repos).
+#   (raw.githubusercontent.com returns 404 on private repos; use the github.com/.../raw/... form).
 # Exit 0 on pass (one ok line to stdout); non-zero with a one-line reason to stderr on fail.
 set -eu
 
@@ -59,20 +61,22 @@ if printf '%s' "$BODY" | grep -qE "$LOCAL_PATH_PAT"; then
   exit 1
 fi
 
-# Fail if the body references raw.githubusercontent.com - those URLs do not render
-# inline on private repos (GitHub image proxy cannot authenticate to fetch them).
+# Fail if the body references raw.githubusercontent.com - those return 404 on private repos.
+# Use github.com/<owner>/<repo>/raw/<sha>/<path> instead (renders inline for authenticated members).
 if printf '%s' "$BODY" | grep -qF 'raw.githubusercontent.com'; then
-  printf 'error: PR body references raw.githubusercontent.com which does not render inline on private repos; use a blob link or GitHub attachment upload instead\n' >&2
+  printf 'error: PR body references raw.githubusercontent.com which returns 404 on private repos; use github.com/<owner>/<repo>/raw/<sha>/<path> instead\n' >&2
   exit 1
 fi
 
-# With --ui, fail if the body has no GitHub attachment image URLs.
-# Attachment URLs: github.com/user-attachments/assets/... or github.com/<owner>/<repo>/assets/...
-# Blob links (github.com/.../blob/...) are click-through only, not inline, and do not satisfy this.
+# With --ui, fail if the body has no inline image URLs.
+# Accepted: github.com/<owner>/<repo>/raw/<sha>/... (commit-sha raw, renders on private repos)
+#           github.com/user-attachments/assets/...  (GitHub attachment)
+#           github.com/<owner>/<repo>/assets/...    (GitHub attachment, legacy form)
+# NOT accepted: blob links (github.com/.../blob/...) - click-through only, not inline.
 if [ "$UI" = 1 ]; then
-  ATTACHMENT_PAT='github\.com/(user-attachments/assets|[^/]+/[^/]+/assets)/'
-  if ! printf '%s' "$BODY" | grep -qE "$ATTACHMENT_PAT"; then
-    printf 'error: PR body has no GitHub attachment images (--ui requires before/after screenshots uploaded as GitHub attachments; blob links are not inline)\n' >&2
+  INLINE_IMG_PAT='github\.com/(user-attachments/assets/|[^/]+/[^/]+/raw/|[^/]+/[^/]+/assets/)'
+  if ! printf '%s' "$BODY" | grep -qE "$INLINE_IMG_PAT"; then
+    printf 'error: PR body has no inline images (--ui requires before/after screenshots using github.com/<owner>/<repo>/raw/<sha>/... URLs or GitHub attachment URLs; blob links are not inline)\n' >&2
     exit 1
   fi
 fi

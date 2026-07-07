@@ -13,6 +13,7 @@
 #   (i) body with a /private/tmp path fails
 #   (j) body with an absolute /Users/... image path fails
 #   (k) a gh fetch failure fails loudly rather than passing as a clean body
+#   (l) --ui github.com/<owner>/<repo>/raw/<sha>/<path> URL passes
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -78,7 +79,7 @@ test_ui_no_images_fails() {
 This satisfies the requirement. No screenshots included."
   err=$(run_check "$case_dir" "$body" --ui "$VALID_URL" 2>&1); rc=$?
   [ "$rc" -ne 0 ] || fail "--ui body with no images should fail but passed"
-  assert_contains "$err" "no GitHub attachment images" "should name the problem"
+  assert_contains "$err" "no inline images" "should name the problem"
   pass "fm-pr-body-check: --ui with no images fails"
 }
 
@@ -102,7 +103,7 @@ test_ui_blob_link_only_fails() {
 | [Before](https://github.com/owner/repo/blob/main/docs/pr-screenshots/task-t1/before.png) | [After](https://github.com/owner/repo/blob/main/docs/pr-screenshots/task-t1/after.png) |"
   err=$(run_check "$case_dir" "$body" --ui "$VALID_URL" 2>&1); rc=$?
   [ "$rc" -ne 0 ] || fail "--ui body with only blob links should fail but passed"
-  assert_contains "$err" "no GitHub attachment images" "should explain blob links are not inline"
+  assert_contains "$err" "no inline images" "should explain blob links are not inline"
   pass "fm-pr-body-check: --ui with blob links only fails"
 }
 
@@ -182,6 +183,20 @@ SH
   pass "fm-pr-body-check: gh fetch failure fails loudly"
 }
 
+# (l) --ui body with a github.com/<owner>/<repo>/raw/<sha>/<path> URL passes.
+# These are commit-sha raw URLs: they render inline for authenticated repo members
+# on both public and private repos, unlike raw.githubusercontent.com which 404s on private repos.
+test_ui_raw_sha_url_passes() {
+  local case_dir
+  case_dir=$(make_case ui-raw-sha)
+  local body="| Before | After |
+|--------|-------|
+| ![before](https://github.com/owner/repo/raw/abc1234def5678/docs/pr-screenshots/task-t1/before.png) | ![after](https://github.com/owner/repo/raw/abc1234def5678/docs/pr-screenshots/task-t1/after.png) |"
+  run_check "$case_dir" "$body" --ui "$VALID_URL" >/dev/null 2>&1
+  expect_code 0 $? "--ui body with github.com/<owner>/<repo>/raw/<sha>/... URL should pass"
+  pass "fm-pr-body-check: --ui with github.com/<owner>/<repo>/raw/<sha>/<path> URL passes"
+}
+
 test_clean_body_passes
 test_var_folders_path_fails
 test_ui_no_images_fails
@@ -193,3 +208,4 @@ test_malformed_url_fails
 test_private_tmp_path_fails
 test_users_image_path_fails
 test_gh_fetch_failure_fails
+test_ui_raw_sha_url_passes

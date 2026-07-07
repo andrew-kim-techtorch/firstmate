@@ -231,11 +231,9 @@ if [ "$MODE" != "local-only" ]; then
 # PR body conventions
 Lead the PR body with what the change satisfies (the requirement being met), not a narrative of the work.
 For any UI-visible change, include before/after screenshots that render inline on GitHub.
-Screenshot images in the PR body must use GitHub attachment URLs - these render inline for all repo members on public and private repos alike.
-GitHub attachment URLs look like `https://github.com/user-attachments/assets/...` or `https://github.com/<owner>/<repo>/assets/...`.
-Attachments are created by dragging images into the GitHub PR editor (browser only; an autonomous agent cannot do this) - flag it in the PR body when screenshots need uploading so a human can complete that step.
-Also commit the source PNG files under `docs/pr-screenshots/<task-id>/` so the images are permanent in repo history.
-Never use a `raw.githubusercontent.com` URL for screenshots - those do not render inline on private repos.
+Commit screenshot PNG files under `docs/pr-screenshots/<task-id>/` and reference them inline using `https://github.com/<owner>/<repo>/raw/<commit-sha>/<path>` URLs, where `<commit-sha>` is the sha of the commit that added the screenshots on your branch.
+These URLs render inline for authenticated repo members during PR review and continue to resolve after a squash-merge because they reference the commit sha directly.
+Never use a `raw.githubusercontent.com` URL for screenshots - those return 404 on private repos.
 Never reference a local filesystem path (`/var/folders`, `/private/tmp`, scratchpad, or `/Users/...`) - those paths render as nothing for reviewers.
 Present before/after screenshots side by side in a `| Before | After |` markdown table.
 PRBODY
