@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # Check a PR body for screenshot references that will not render for reviewers,
-# and (with --ui) assert that the body contains at least one screenshot reference.
+# and (with --ui) assert that the body contains at least one GitHub attachment image.
 # Firstmate runs this before relaying a PR as ready; the PR body conventions
 # in bin/fm-brief.sh's ship-brief scaffold are the one authoritative source of
 # what crewmates are expected to follow.
 # Usage: fm-pr-body-check.sh [--ui] <pr-url>
-#   --ui  also assert the body contains at least one screenshot reference
-#         (inline GitHub attachment image, blob link to an image file, or <img> tag)
-# Always fails on: local filesystem paths, raw.githubusercontent.com image refs
+#   --ui  also assert the body contains at least one GitHub attachment image URL
+#         (github.com/user-attachments/assets/... or github.com/<owner>/<repo>/assets/...).
+#         Blob links (github.com/.../blob/...) are click-through only and do NOT satisfy
+#         this requirement.
+# Always fails on: local filesystem paths, raw.githubusercontent.com refs
 #   (raw URLs do not render inline on private repos).
 # Exit 0 on pass (one ok line to stdout); non-zero with a one-line reason to stderr on fail.
 set -eu
@@ -59,13 +61,13 @@ if printf '%s' "$BODY" | grep -qF 'raw.githubusercontent.com'; then
   exit 1
 fi
 
-# With --ui, fail if the body has no screenshot references at all.
-# Valid references: inline GitHub attachment images (![...](https://...githubusercontent.com/...)),
-# blob links to image files (https://github.com/.../blob/.../file.png), or <img> tags.
+# With --ui, fail if the body has no GitHub attachment image URLs.
+# Attachment URLs: github.com/user-attachments/assets/... or github.com/<owner>/<repo>/assets/...
+# Blob links (github.com/.../blob/...) are click-through only, not inline, and do not satisfy this.
 if [ "$UI" = 1 ]; then
-  SCREENSHOT_PAT='(!\[.*\]\(|<img |github\.com/[^)]+/blob/[^)]+\.(png|jpg|jpeg|gif|svg))'
-  if ! printf '%s' "$BODY" | grep -qE "$SCREENSHOT_PAT"; then
-    printf 'error: PR body has no screenshot references (--ui requires before/after screenshots as blob links or GitHub attachment uploads)\n' >&2
+  ATTACHMENT_PAT='github\.com/(user-attachments/assets|[^/]+/[^/]+/assets)/'
+  if ! printf '%s' "$BODY" | grep -qE "$ATTACHMENT_PAT"; then
+    printf 'error: PR body has no GitHub attachment images (--ui requires before/after screenshots uploaded as GitHub attachments; blob links are not inline)\n' >&2
     exit 1
   fi
 fi

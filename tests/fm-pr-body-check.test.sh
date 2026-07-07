@@ -4,14 +4,14 @@
 # Matrix:
 #   (a) clean body passes (exit 0)
 #   (b) body with a /var/folders path fails (exit non-zero)
-#   (c) --ui body with no screenshot references fails (exit non-zero)
+#   (c) --ui body with no images at all fails
 #   (d) raw.githubusercontent.com reference fails (always, not just --ui)
-#   (e) --ui body with a GitHub blob link to an image file passes (exit 0)
-#   (f) --ui body with a GitHub attachment markdown image passes (exit 0)
-#   (g) --ui body with an <img ...> tag passes (exit 0)
+#   (e) --ui blob link only fails (blob links are click-through, not inline)
+#   (f) --ui user-attachments/assets URL passes
+#   (g) --ui <owner>/<repo>/assets URL passes
 #   (h) malformed PR URL fails fast without calling gh
-#   (i) body with a /private/tmp path fails (exit non-zero)
-#   (j) body with an absolute /Users/... image path fails (exit non-zero)
+#   (i) body with a /private/tmp path fails
+#   (j) body with an absolute /Users/... image path fails
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -22,8 +22,7 @@ TMP_ROOT=$(fm_test_tmproot fm-pr-body-check-tests)
 
 VALID_URL="https://github.com/owner/repo/pull/42"
 
-# Build a sandbox with a fake `gh` that outputs $FM_TEST_PR_BODY on
-# `gh pr view ... --json body -q ...`.
+# Build a sandbox with a fake `gh` that outputs $FM_TEST_PR_BODY.
 make_case() {
   local name=$1 case_dir fakebin
   case_dir="$TMP_ROOT/$name"
@@ -69,79 +68,63 @@ test_var_folders_path_fails() {
   pass "fm-pr-body-check: /var/folders path fails"
 }
 
-# (c) --ui body with no screenshot references fails.
-test_ui_no_screenshots_fails() {
+# (c) --ui body with no images at all fails.
+test_ui_no_images_fails() {
   local case_dir err rc
-  case_dir=$(make_case ui-no-screenshots)
+  case_dir=$(make_case ui-no-images)
   local body="## Summary
 
 This satisfies the requirement. No screenshots included."
   err=$(run_check "$case_dir" "$body" --ui "$VALID_URL" 2>&1); rc=$?
-  [ "$rc" -ne 0 ] || fail "--ui body with no screenshots should fail but passed"
-  assert_contains "$err" "no screenshot references" "should name the problem"
-  pass "fm-pr-body-check: --ui with no screenshots fails"
+  [ "$rc" -ne 0 ] || fail "--ui body with no images should fail but passed"
+  assert_contains "$err" "no GitHub attachment images" "should name the problem"
+  pass "fm-pr-body-check: --ui with no images fails"
 }
 
 # (d) raw.githubusercontent.com reference fails (always, not just --ui).
 test_raw_githubusercontent_fails() {
   local case_dir err rc
   case_dir=$(make_case raw-githubusercontent)
-  local body="| Before | After |
-|--------|-------|
-| ![before](https://raw.githubusercontent.com/owner/repo/abc123/docs/pr-screenshots/task-a1/before.png) | ![after](https://raw.githubusercontent.com/owner/repo/abc123/docs/pr-screenshots/task-a1/after.png) |"
+  local body="![before](https://raw.githubusercontent.com/owner/repo/abc/docs/pr-screenshots/t1/before.png)"
   err=$(run_check "$case_dir" "$body" "$VALID_URL" 2>&1); rc=$?
   [ "$rc" -ne 0 ] || fail "body with raw.githubusercontent.com should fail but passed"
   assert_contains "$err" "raw.githubusercontent.com" "should name the problem"
-  pass "fm-pr-body-check: raw.githubusercontent.com image ref fails"
+  pass "fm-pr-body-check: raw.githubusercontent.com ref fails"
 }
 
-# (d2) raw.githubusercontent.com also fails with --ui.
-test_raw_githubusercontent_fails_with_ui() {
+# (e) --ui with only a blob link fails (blob links are click-through, not inline images).
+test_ui_blob_link_only_fails() {
   local case_dir err rc
-  case_dir=$(make_case raw-githubusercontent-ui)
-  local body="![before](https://raw.githubusercontent.com/owner/repo/abc/docs/pr-screenshots/t1/before.png)"
-  err=$(run_check "$case_dir" "$body" --ui "$VALID_URL" 2>&1); rc=$?
-  [ "$rc" -ne 0 ] || fail "--ui body with raw.githubusercontent.com should fail but passed"
-  assert_contains "$err" "raw.githubusercontent.com" "should name the problem"
-  pass "fm-pr-body-check: --ui raw.githubusercontent.com fails"
-}
-
-# (e) --ui body with a GitHub blob link to an image file passes.
-test_ui_blob_link_passes() {
-  local case_dir
-  case_dir=$(make_case ui-blob-link)
-  local body="## Summary
-
-| Before | After |
-|--------|-------|
-| [Before](https://github.com/owner/repo/blob/main/docs/pr-screenshots/task-t1/before.png) | [After](https://github.com/owner/repo/blob/main/docs/pr-screenshots/task-t1/after.png) |
-
-> Inline rendering requires GitHub attachment upload (human action); links above open for authenticated reviewers."
-  run_check "$case_dir" "$body" --ui "$VALID_URL" >/dev/null 2>&1
-  expect_code 0 $? "--ui body with blob links should pass"
-  pass "fm-pr-body-check: --ui with GitHub blob link to image passes"
-}
-
-# (f) --ui body with a GitHub attachment markdown image passes.
-test_ui_attachment_image_passes() {
-  local case_dir
-  case_dir=$(make_case ui-attachment-image)
+  case_dir=$(make_case ui-blob-only)
   local body="| Before | After |
 |--------|-------|
-| ![before](https://user-images.githubusercontent.com/123/before.png) | ![after](https://user-images.githubusercontent.com/123/after.png) |"
-  run_check "$case_dir" "$body" --ui "$VALID_URL" >/dev/null 2>&1
-  expect_code 0 $? "--ui body with GitHub attachment images should pass"
-  pass "fm-pr-body-check: --ui with GitHub attachment image passes"
+| [Before](https://github.com/owner/repo/blob/main/docs/pr-screenshots/task-t1/before.png) | [After](https://github.com/owner/repo/blob/main/docs/pr-screenshots/task-t1/after.png) |"
+  err=$(run_check "$case_dir" "$body" --ui "$VALID_URL" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "--ui body with only blob links should fail but passed"
+  assert_contains "$err" "no GitHub attachment images" "should explain blob links are not inline"
+  pass "fm-pr-body-check: --ui with blob links only fails"
 }
 
-# (g) --ui body with an <img ...> tag passes.
-test_ui_img_tag_passes() {
+# (f) --ui body with a user-attachments/assets URL passes.
+test_ui_user_attachments_passes() {
   local case_dir
-  case_dir=$(make_case ui-img-tag)
-  local body="<img src='https://user-images.githubusercontent.com/123/screenshot.png' alt='after'>"
+  case_dir=$(make_case ui-user-attachments)
+  local body="| Before | After |
+|--------|-------|
+| ![before](https://github.com/user-attachments/assets/abc-123-before.png) | ![after](https://github.com/user-attachments/assets/abc-123-after.png) |"
   run_check "$case_dir" "$body" --ui "$VALID_URL" >/dev/null 2>&1
-  expect_code 0 $? "--ui body with an <img> tag should pass"
-  pass "fm-pr-body-check: --ui with <img> tag passes"
+  expect_code 0 $? "--ui body with user-attachments/assets URL should pass"
+  pass "fm-pr-body-check: --ui with user-attachments/assets URL passes"
+}
+
+# (g) --ui body with an <owner>/<repo>/assets URL passes.
+test_ui_repo_assets_passes() {
+  local case_dir
+  case_dir=$(make_case ui-repo-assets)
+  local body="![after](https://github.com/owner/repo/assets/12345/after.png)"
+  run_check "$case_dir" "$body" --ui "$VALID_URL" >/dev/null 2>&1
+  expect_code 0 $? "--ui body with <owner>/<repo>/assets URL should pass"
+  pass "fm-pr-body-check: --ui with <owner>/<repo>/assets URL passes"
 }
 
 # (h) Malformed PR URL fails fast without calling gh.
@@ -182,12 +165,11 @@ test_users_image_path_fails() {
 
 test_clean_body_passes
 test_var_folders_path_fails
-test_ui_no_screenshots_fails
+test_ui_no_images_fails
 test_raw_githubusercontent_fails
-test_raw_githubusercontent_fails_with_ui
-test_ui_blob_link_passes
-test_ui_attachment_image_passes
-test_ui_img_tag_passes
+test_ui_blob_link_only_fails
+test_ui_user_attachments_passes
+test_ui_repo_assets_passes
 test_malformed_url_fails
 test_private_tmp_path_fails
 test_users_image_path_fails
