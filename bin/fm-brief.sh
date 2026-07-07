@@ -236,6 +236,8 @@ These URLs render inline for authenticated repo members during PR review and con
 Never use a `raw.githubusercontent.com` URL for screenshots - those return 404 on private repos.
 Never reference a local filesystem path (`/var/folders`, `/private/tmp`, scratchpad, or `/Users/...`) - those paths render as nothing for reviewers.
 Present before/after screenshots side by side in a `| Before | After |` markdown table.
+If this PR fixes or extends another PR, reference it in the body (`Follow-on to #N`, `Fixes the X from #N`).
+If firstmate provides a workstream tracking issue, reference it with `Part of #<issue>`.
 PRBODY
 )
 else

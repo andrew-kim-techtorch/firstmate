@@ -14,6 +14,8 @@
 #   (j) body with an absolute /Users/... image path fails
 #   (k) a gh fetch failure fails loudly rather than passing as a clean body
 #   (l) --ui github.com/<owner>/<repo>/raw/<sha>/<path> URL passes
+#   (m) body with a #N reference passes without warning
+#   (n) body with no thread link at all exits 0 but emits a warning
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -197,6 +199,31 @@ test_ui_raw_sha_url_passes() {
   pass "fm-pr-body-check: --ui with github.com/<owner>/<repo>/raw/<sha>/<path> URL passes"
 }
 
+# (m) Body with a #N reference passes without a thread-link warning.
+test_body_with_issue_ref_no_warning() {
+  local case_dir out
+  case_dir=$(make_case issue-ref)
+  local body="Follow-on to #42. Fixes the screenshot bug from #41."
+  out=$(run_check "$case_dir" "$body" "$VALID_URL" 2>&1)
+  expect_code 0 $? "body with #N reference should pass"
+  assert_not_contains "$out" "warning" "body with #N ref should not warn"
+  pass "fm-pr-body-check: body with #N reference passes without warning"
+}
+
+# (n) Body with no thread link at all exits 0 but emits a warning.
+test_body_no_thread_link_warns() {
+  local case_dir out rc
+  case_dir=$(make_case no-thread-link)
+  local body="## Summary
+
+This change satisfies the login redirect requirement."
+  out=$(run_check "$case_dir" "$body" "$VALID_URL" 2>&1); rc=$?
+  expect_code 0 $rc "no thread link should exit 0 (lenient warning, not failure)"
+  assert_contains "$out" "warning" "no thread link should emit a warning"
+  assert_contains "$out" "thread link" "warning should name the problem"
+  pass "fm-pr-body-check: no thread link exits 0 with warning"
+}
+
 test_clean_body_passes
 test_var_folders_path_fails
 test_ui_no_images_fails
@@ -209,3 +236,5 @@ test_private_tmp_path_fails
 test_users_image_path_fails
 test_gh_fetch_failure_fails
 test_ui_raw_sha_url_passes
+test_body_with_issue_ref_no_warning
+test_body_no_thread_link_warns
