@@ -12,6 +12,7 @@
 #   (h) malformed PR URL fails fast without calling gh
 #   (i) body with a /private/tmp path fails
 #   (j) body with an absolute /Users/... image path fails
+#   (k) a gh fetch failure fails loudly rather than passing as a clean body
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -163,6 +164,24 @@ test_users_image_path_fails() {
   pass "fm-pr-body-check: /Users/... image path fails"
 }
 
+# (k) A gh fetch failure (bad auth, network, deleted PR) fails loudly.
+# An empty body from a *successful* fetch is clean; a *failed* fetch must not
+# be mistaken for one, which is the PR-#11-class regression this guards.
+test_gh_fetch_failure_fails() {
+  local case_dir err rc
+  case_dir=$(make_case gh-fetch-failure)
+  cat > "$case_dir/fakebin/gh" <<'SH'
+#!/usr/bin/env bash
+printf 'error: Could not resolve to a PullRequest\n' >&2
+exit 1
+SH
+  chmod +x "$case_dir/fakebin/gh"
+  err=$(PATH="$case_dir/fakebin:$PATH" "$CHECK" "$VALID_URL" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "gh fetch failure should fail but passed"
+  assert_contains "$err" "could not fetch PR body" "should report the fetch failure"
+  pass "fm-pr-body-check: gh fetch failure fails loudly"
+}
+
 test_clean_body_passes
 test_var_folders_path_fails
 test_ui_no_images_fails
@@ -173,3 +192,4 @@ test_ui_repo_assets_passes
 test_malformed_url_fails
 test_private_tmp_path_fails
 test_users_image_path_fails
+test_gh_fetch_failure_fails

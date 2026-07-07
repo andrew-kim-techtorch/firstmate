@@ -45,7 +45,12 @@ parse_pr_url "$URL" || exit 1
 
 # Fetch the PR body as plain text.
 # Use `gh` directly for JSON queries; gh-axi does not expose --json/-q.
-BODY=$(gh pr view "$PR_NUMBER" --repo "$PR_OWNER/$PR_REPO" --json body -q '.body // ""' 2>/dev/null || true)
+# A fetch failure (bad auth, network, deleted/renamed PR, wrong repo) must fail
+# loudly rather than looking like a clean empty body and passing the check.
+if ! BODY=$(gh pr view "$PR_NUMBER" --repo "$PR_OWNER/$PR_REPO" --json body -q '.body // ""' 2>/dev/null); then
+  printf 'error: could not fetch PR body for %s/%s#%s (check auth, network, and that the PR exists)\n' "$PR_OWNER" "$PR_REPO" "$PR_NUMBER" >&2
+  exit 1
+fi
 
 # Fail if the body references a local filesystem path that will not render on GitHub.
 LOCAL_PATH_PAT='(/var/folders|/private/tmp|/Users/[^[:space:]]*\.(png|jpg|jpeg|gif|svg))'
