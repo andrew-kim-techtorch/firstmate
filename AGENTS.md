@@ -574,7 +574,7 @@ During the `ci` monitor phase, `bin/fm-crew-state.sh` also reads the ci step log
 
 For PR-based ship tasks, the ready signal depends on mode: `no-mistakes` reports `done: PR <url> checks green` after CI is green, while `direct-PR` reports `done: PR <url>` after opening the PR.
 Run `bin/fm-pr-check.sh <id> <PR url>` - it records `pr=` and GitHub's `pr_head=` when available in the task's meta and arms the watcher's merge poll.
-Run `bin/fm-pr-body-check.sh <PR url>` (add `--ui` for any UI-visible change) before relaying the PR; the PR body conventions in the brief scaffold (`bin/fm-brief.sh`) define what it checks.
+Run `bin/fm-pr-body-check.sh <PR url>` (add `--ui` for any UI-visible change) before relaying the PR; it enforces the canonical PR body standard on substance (a bare or pipeline-default body fails), demonstrated in full by the brief scaffold (`bin/fm-brief.sh`).
 Tell the captain: the PR's full URL (always the complete `https://...` link, never a bare `#number` - the captain's terminal makes a full URL clickable), a one-paragraph summary, and, for `no-mistakes`, the risk level it emitted.
 (The check contract, for any custom `state/<id>.check.sh` you write yourself: print one line only when firstmate should wake, print nothing otherwise, and finish before `FM_CHECK_TIMEOUT`.)
 
