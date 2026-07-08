@@ -238,6 +238,49 @@ Never reference a local filesystem path (`/var/folders`, `/private/tmp`, scratch
 Present before/after screenshots side by side in a `| Before | After |` markdown table.
 If this PR fixes or extends another PR, reference it in the body (`Follow-on to #N`, `Fixes the X from #N`).
 If firstmate provides a workstream tracking issue, reference it with `Part of #<issue>`.
+
+The canonical PR body has these sections, in order: **Requirement** (the lead), **What changed** (summary plus a schematic shown alongside the content), **How it works** (a real worked example with concrete values), **Evidence** (a UI before/after table for UI changes, plus a Testing suite table, evidence shown inline), **Risks**, and **Links**.
+`bin/fm-pr-body-check.sh` enforces this on substance, not just heading presence: a bare or pipeline-default body fails.
+The full spec lives in `data/notes/pr-body-template.md`; the filled reference below is the exact quality bar to match.
+
+REQUIRED FINAL STEP for PR-based ship tasks - not optional: the no-mistakes pipeline generates its OWN default body (`## Intent` / `## What Changed` / `## Risk Assessment` / `## Testing` / `## Pipeline`), which overwrites any canonical body you wrote. After the pipeline finishes and before you report the PR ready, you MUST rewrite the PR body to the canonical template with `gh-axi pr edit`, preserving the auto-appended `## Pipeline` footer verbatim at the end. (direct-PR: author the body to this template from the start; there is no pipeline default to replace.)
+
+Filled reference PR body - match this substance (real schematic, real worked example, populated tables), not just the headings:
+
+---
+**Requirement:** <state the one requirement this PR satisfies, in one line>
+
+## What changed
+<one-paragraph summary of the change, read alongside the schematic below>
+
+```mermaid
+flowchart LR
+  caller["caller"] --> fn["changed function"]
+  fn --> store[("data store")]
+```
+
+## How it works
+<a concrete worked example with real values, not placeholders>: e.g. given a queued task `fix-login-k3` blocked by `auth-x9`, once `auth-x9` merges the dispatcher now releases `fix-login-k3` on the next pass instead of leaving it stranded.
+
+## Evidence
+Before/after (UI-visible changes only):
+
+| Before | After |
+|--------|-------|
+| ![before](https://github.com/<owner>/<repo>/raw/<commit-sha>/docs/pr-screenshots/<task-id>/before.png) | ![after](https://github.com/<owner>/<repo>/raw/<commit-sha>/docs/pr-screenshots/<task-id>/after.png) |
+
+Testing suite:
+
+| Suite | What it guards | Result | Command |
+|-------|----------------|--------|---------|
+| tests/fm-example.test.sh | the new dispatch guard releases a task on unblock | pass (7/7) | bash tests/fm-example.test.sh |
+
+## Risks
+<real risks and mitigations, or "None: additive change fully covered by the suite above">
+
+## Links
+Follow-on to #N. Part of #<issue>.
+---
 PRBODY
 )
 else

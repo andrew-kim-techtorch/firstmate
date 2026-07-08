@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# Check a PR body for screenshot references that will not render for reviewers,
-# and (with --ui) assert that the body contains at least one inline image URL.
-# Firstmate runs this before relaying a PR as ready; the PR body conventions
-# in bin/fm-brief.sh's ship-brief scaffold are the one authoritative source of
-# what crewmates are expected to follow.
+# Check a PR body for SUBSTANCE against the canonical PR-body standard, so a bare
+# or no-mistakes-pipeline-default body fails rather than passing on section
+# presence alone. Also checks for screenshot references that will not render for
+# reviewers, and (with --ui) asserts an inline image URL and a before/after table.
+# Firstmate runs this before relaying a PR as ready.
+# The canonical standard is specified in data/notes/pr-body-template.md and
+# demonstrated in full by bin/fm-brief.sh's ship-brief scaffold (the filled
+# reference body); this script enforces that same standard and does not restate it.
 # Usage: fm-pr-body-check.sh [--ui] <pr-url>
 #   --ui  also assert the body contains at least one inline image URL.
 #         Accepted inline URL forms:
@@ -79,6 +82,60 @@ if [ "$UI" = 1 ]; then
     printf 'error: PR body has no inline images (--ui requires before/after screenshots using github.com/<owner>/<repo>/raw/<sha>/... URLs or GitHub attachment URLs; blob links are not inline)\n' >&2
     exit 1
   fi
+  # A UI change must present the screenshots in a | Before | After | table.
+  if ! printf '%s' "$BODY" | grep -qiE '^[[:space:]]*\|[[:space:]]*before[[:space:]]*\|[[:space:]]*after[[:space:]]*\|'; then
+    printf 'error: --ui requires a "| Before | After |" screenshot comparison table\n' >&2
+    exit 1
+  fi
+fi
+
+# --- Substance checks: reject a bare body or the no-mistakes pipeline default. ---
+# The canonical standard (data/notes/pr-body-template.md, demonstrated in
+# bin/fm-brief.sh) requires real content, not just section headings.
+
+# Must lead with the requirement being satisfied, not the pipeline's ## Intent.
+if ! printf '%s\n' "$BODY" | head -n 8 | grep -qiE '(\*\*Requirement|^#{1,6}[[:space:]]*Requirement|^Requirement:)'; then
+  printf 'error: PR body must lead with the requirement it satisfies (e.g. "**Requirement:** ...") near the top\n' >&2
+  exit 1
+fi
+
+# Must use the canonical section names, not the pipeline defaults
+# (## Intent / ## What Changed / ## Risk Assessment / ## Testing / ## Pipeline).
+missing=
+for s in "What changed" "How it works" "Evidence" "Risks" "Links"; do
+  if ! printf '%s' "$BODY" | grep -qiE "^#{1,6}[[:space:]]+${s}([[:space:]]|\$)"; then
+    missing="${missing:+$missing, }$s"
+  fi
+done
+if [ -n "$missing" ]; then
+  printf 'error: PR body missing canonical section(s): %s (a bare or pipeline-default body fails; rewrite to the fm-brief.sh template)\n' "$missing" >&2
+  exit 1
+fi
+
+# The What changed section must carry a fenced mermaid/erDiagram schematic.
+if ! printf '%s' "$BODY" | grep -qE '^[[:space:]]*```[[:space:]]*(mermaid|erDiagram)'; then
+  printf 'error: PR body has no fenced ```mermaid (or erDiagram) schematic in the What changed section\n' >&2
+  exit 1
+fi
+
+# The Evidence section must be substantiated inline, not a lone vague claim
+# like "verified seed load and guidance rendering" - require a table row,
+# a <details> block, or command/code output within the section body.
+EVIDENCE=$(printf '%s\n' "$BODY" | awk '
+  /^#{1,6}[[:space:]]+[Ee]vidence/ { in_e=1; next }
+  in_e && /^#{1,6}[[:space:]]/ { in_e=0 }
+  in_e { print }
+')
+# shellcheck disable=SC2016  # single quotes are intentional: literal regex, no shell expansion
+if ! printf '%s' "$EVIDENCE" | grep -qE '(\|.*\|.*\||<details>|```|`[^`]+`|^\$ )'; then
+  printf 'error: Evidence section is a vague claim with no table, <details>, or command output; show the evidence inline\n' >&2
+  exit 1
+fi
+
+# Must contain at least one Testing/Evidence table row.
+if ! printf '%s' "$BODY" | grep -qE '^[[:space:]]*\|.*\|.*\|'; then
+  printf 'error: PR body has no Testing/Evidence table; add a "| Suite | What it guards | Result | Command |" table with real rows\n' >&2
+  exit 1
 fi
 
 # Lenient warning: flag a body with no thread link at all.
