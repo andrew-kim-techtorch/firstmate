@@ -73,7 +73,9 @@
 # Per-harness turn-end hooks are installed automatically; some live outside the worktree.
 # grok uses a firstmate-owned global hook under ${GROK_HOME:-$HOME/.grok}/hooks
 # plus a gitignored .fm-grok-turnend worktree pointer and a state token.
-# On success prints: spawned <id> harness=<name> kind=<ship|scout|secondmate> mode=<mode> yolo=<on|off> window=<backend-target> worktree=<path>
+# On success prints:
+#   spawned <id> harness=<name> model=<model> effort=<effort> kind=<ship|scout|secondmate> mode=<mode> yolo=<on|off> window=<backend-target> worktree=<path>
+#   dispatch: <id> -> <harness>/<model>/<effort> (<kind>, <mode>, yolo=<on|off>)
 # mode/yolo are resolved per-project from data/projects.md for ship/scout tasks;
 # secondmate spawns record mode=secondmate, yolo=off, home=, and projects=.
 set -eu
@@ -1019,4 +1021,7 @@ spawn_send_literal "$T" "$LAUNCH"
 sleep 0.3
 spawn_send_key "$T" Enter
 
-echo "spawned $ID harness=$HARNESS kind=$KIND mode=$MODE yolo=$YOLO window=$META_WINDOW worktree=$WT"
+RESOURCE_MODEL=${MODEL:-default}
+RESOURCE_EFFORT=${EFFORT:-default}
+echo "spawned $ID harness=$HARNESS model=$RESOURCE_MODEL effort=$RESOURCE_EFFORT kind=$KIND mode=$MODE yolo=$YOLO window=$META_WINDOW worktree=$WT"
+echo "dispatch: $ID -> $HARNESS/$RESOURCE_MODEL/$RESOURCE_EFFORT ($KIND, $MODE, yolo=$YOLO)"

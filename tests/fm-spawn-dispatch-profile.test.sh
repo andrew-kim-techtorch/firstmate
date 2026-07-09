@@ -339,8 +339,10 @@ test_batch_forwards_shared_profile_flags() {
     "$id1=$PROJ_DIR" "$id2=$PROJ_DIR" --harness codex --model gpt-5 --effort high)
   status=$?
   expect_code 0 "$status" "batch spawn with shared profile flags should succeed"
-  assert_contains "$out" "spawned $id1 harness=codex" "first batch task did not use shared harness"
-  assert_contains "$out" "spawned $id2 harness=codex" "second batch task did not use shared harness"
+  assert_contains "$out" "spawned $id1 harness=codex model=gpt-5 effort=high" "first batch task did not report shared resource"
+  assert_contains "$out" "spawned $id2 harness=codex model=gpt-5 effort=high" "second batch task did not report shared resource"
+  assert_contains "$out" "dispatch: $id1 -> codex/gpt-5/high (ship, no-mistakes, yolo=off)" "first batch task did not print dispatch summary"
+  assert_contains "$out" "dispatch: $id2 -> codex/gpt-5/high (ship, no-mistakes, yolo=off)" "second batch task did not print dispatch summary"
   assert_meta_profile "$HOME_DIR/state/$id1.meta" codex gpt-5 high
   assert_meta_profile "$HOME_DIR/state/$id2.meta" codex gpt-5 high
   pass "batch dispatch forwards shared --harness, --model, and --effort to every pair"
@@ -358,7 +360,8 @@ test_active_dispatch_profile_does_not_block_secondmate_launch() {
   out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" --secondmate)
   status=$?
   expect_code 0 "$status" "secondmate spawn should be exempt from the dispatch-profile explicit harness requirement"
-  assert_contains "$out" "spawned $id harness=codex kind=secondmate" "secondmate launch did not use secondmate harness resolution"
+  assert_contains "$out" "spawned $id harness=codex model=default effort=default kind=secondmate" "secondmate launch did not use secondmate harness resolution"
+  assert_contains "$out" "dispatch: $id -> codex/default/default (secondmate, secondmate, yolo=off)" "secondmate launch did not print dispatch summary"
   assert_grep "kind=secondmate" "$HOME_DIR/state/$id.meta" "secondmate meta missing kind=secondmate"
   assert_meta_profile "$HOME_DIR/state/$id.meta" codex default default
   pass "active crew-dispatch profile does not block secondmate launches"
