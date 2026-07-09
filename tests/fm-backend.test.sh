@@ -746,9 +746,13 @@ test_spawn_conformance_old_vs_new() {
 
   expect_code 0 "$rc_old" "old fm-spawn.sh should succeed"$'\n'"$out_old"
   expect_code 0 "$rc_new" "new fm-spawn.sh should succeed"$'\n'"$out_new"
-  [ "$out_old" = "$out_new" ] || fail "fm-spawn.sh stdout differs old vs new"$'\n'"--- old ---"$'\n'"$out_old"$'\n'"--- new ---"$'\n'"$out_new"
-  assert_contains "$out_new" "spawned $id harness=claude kind=ship mode=no-mistakes yolo=off window=firstmate:fm-$id worktree=$wt" \
+  # stdout intentionally diverged from BASE_REF: the dispatch-echo change added
+  # model=/effort= to the spawned line plus a dispatch summary line. The backend
+  # refactor conformance guard is the tmux command-log diff below, unchanged.
+  assert_contains "$out_new" "spawned $id harness=claude model=default effort=default kind=ship mode=no-mistakes yolo=off window=firstmate:fm-$id worktree=$wt" \
     "spawn output missing the expected summary line"
+  assert_contains "$out_new" "dispatch: $id -> claude/default/default (ship, no-mistakes, yolo=off)" \
+    "spawn output missing the dispatch summary line"
 
   diff -u "$log_old" "$log_new" > "$TMP_ROOT/spawn-diff.txt" 2>&1 \
     || fail "fm-spawn.sh: tmux command log differs old vs new"$'\n'"$(cat "$TMP_ROOT/spawn-diff.txt")"
@@ -761,7 +765,7 @@ test_spawn_conformance_old_vs_new() {
     "spawn tmux log missing the literal launch-command send"
 
   rm -rf "/tmp/fm-$id"
-  pass "fm-spawn.sh: tmux command log and printed summary line are byte-identical old vs new for a ship-task claude spawn"
+  pass "fm-spawn.sh: tmux command log is byte-identical old vs new; printed summary carries the dispatch resource for a ship-task claude spawn"
 }
 
 # --- symlinked project prefix must not false-refuse the isolation guard -----
