@@ -1,21 +1,33 @@
 #!/usr/bin/env bash
 # Tests for bin/fm-pr-body-check.sh.
 #
+# The check enforces the canonical PR-body standard on SUBSTANCE, not just
+# section presence, so a bare or no-mistakes-pipeline-default body must fail.
 # Matrix:
-#   (a) clean body passes (exit 0)
-#   (b) body with a /var/folders path fails (exit non-zero)
-#   (c) --ui body with no images at all fails
+#   Rendering/path checks (pre-existing):
+#   (b) body with a /var/folders path fails
 #   (d) raw.githubusercontent.com reference fails (always, not just --ui)
+#   (c) --ui body with no images at all fails
 #   (e) --ui blob link only fails (blob links are click-through, not inline)
-#   (f) --ui user-attachments/assets URL passes
-#   (g) --ui <owner>/<repo>/assets URL passes
 #   (h) malformed PR URL fails fast without calling gh
 #   (i) body with a /private/tmp path fails
 #   (j) body with an absolute /Users/... image path fails
 #   (k) a gh fetch failure fails loudly rather than passing as a clean body
-#   (l) --ui github.com/<owner>/<repo>/raw/<sha>/<path> URL passes
-#   (m) body with a #N reference passes without warning
-#   (n) body with no thread link at all exits 0 but emits a warning
+#   Substance checks (new):
+#   (s1) a real no-mistakes pipeline-default body fails
+#   (s2) a body leading with a requirement but using pipeline section names fails
+#   (s3) a bare one-line body fails
+#   (s4) a canonical body missing the mermaid schematic fails
+#   (s5) a canonical body whose Evidence is a lone vague claim fails
+#   (s6) a canonical body with no Testing/Evidence table fails
+#   (s7) --ui canonical-ish body with an inline image but no Before/After table fails
+#   Canonical passes:
+#   (a) full canonical body passes (no --ui)
+#   (l) --ui canonical body with github.com/<owner>/<repo>/raw/<sha>/<path> URLs passes
+#   (f) --ui canonical body with user-attachments/assets URLs passes
+#   (g) --ui canonical body with <owner>/<repo>/assets URLs passes
+#   (m) canonical body with a #N reference passes without a thread-link warning
+#   (n) canonical body with no thread link exits 0 but emits a warning
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -25,6 +37,47 @@ CHECK="$ROOT/bin/fm-pr-body-check.sh"
 TMP_ROOT=$(fm_test_tmproot fm-pr-body-check-tests)
 
 VALID_URL="https://github.com/owner/repo/pull/42"
+
+# A full canonical PR body that passes every check, including --ui.
+# Args (all optional): <links-line> <before-img-url> <after-img-url>.
+canonical_body() {
+  local links=${1:-'Follow-on to #42.'}
+  local before=${2:-'https://github.com/owner/repo/raw/abc1234/docs/pr-screenshots/t1/before.png'}
+  local after=${3:-'https://github.com/owner/repo/raw/abc1234/docs/pr-screenshots/t1/after.png'}
+  cat <<EOF
+**Requirement:** Bare and pipeline-default PR bodies must fail the substance check.
+
+## What changed
+The check now enforces canonical sections on substance, read alongside the schematic below.
+
+\`\`\`mermaid
+flowchart LR
+  crew --> check
+\`\`\`
+
+## How it works
+Given a pipeline-default body with \`## Intent\` and no \`## Evidence\`, the check exits 1 naming the gap.
+
+## Evidence
+Before/after:
+
+| Before | After |
+|--------|-------|
+| ![before]($before) | ![after]($after) |
+
+Testing suite:
+
+| Suite | What it guards | Result | Command |
+|-------|----------------|--------|---------|
+| tests/fm-pr-body-check.test.sh | canonical passes, bare/pipeline fail | pass | bash tests/fm-pr-body-check.test.sh |
+
+## Risks
+None: advisory tooling, does not gate the pipeline.
+
+## Links
+$links
+EOF
+}
 
 # Build a sandbox with a fake `gh` that outputs $FM_TEST_PR_BODY.
 make_case() {
@@ -45,21 +98,7 @@ run_check() {
   FM_TEST_PR_BODY="$body" PATH="$case_dir/fakebin:$PATH" "$CHECK" "$@"
 }
 
-# (a) Clean body with no bad paths and no --ui passes.
-test_clean_body_passes() {
-  local case_dir
-  case_dir=$(make_case clean)
-  local body="## Summary
-
-This change satisfies the login redirect requirement.
-
-| Before | After |
-|--------|-------|
-| [Before screenshot](https://github.com/owner/repo/blob/main/docs/pr-screenshots/task-a1/before.png) | [After screenshot](https://github.com/owner/repo/blob/main/docs/pr-screenshots/task-a1/after.png) |"
-  run_check "$case_dir" "$body" "$VALID_URL" >/dev/null 2>&1
-  expect_code 0 $? "clean body should pass"
-  pass "fm-pr-body-check: clean body passes"
-}
+# --- rendering / path checks -------------------------------------------------
 
 # (b) Body with a /var/folders path fails.
 test_var_folders_path_fails() {
@@ -107,28 +146,6 @@ test_ui_blob_link_only_fails() {
   [ "$rc" -ne 0 ] || fail "--ui body with only blob links should fail but passed"
   assert_contains "$err" "no inline images" "should explain blob links are not inline"
   pass "fm-pr-body-check: --ui with blob links only fails"
-}
-
-# (f) --ui body with a user-attachments/assets URL passes.
-test_ui_user_attachments_passes() {
-  local case_dir
-  case_dir=$(make_case ui-user-attachments)
-  local body="| Before | After |
-|--------|-------|
-| ![before](https://github.com/user-attachments/assets/abc-123-before.png) | ![after](https://github.com/user-attachments/assets/abc-123-after.png) |"
-  run_check "$case_dir" "$body" --ui "$VALID_URL" >/dev/null 2>&1
-  expect_code 0 $? "--ui body with user-attachments/assets URL should pass"
-  pass "fm-pr-body-check: --ui with user-attachments/assets URL passes"
-}
-
-# (g) --ui body with an <owner>/<repo>/assets URL passes.
-test_ui_repo_assets_passes() {
-  local case_dir
-  case_dir=$(make_case ui-repo-assets)
-  local body="![after](https://github.com/owner/repo/assets/12345/after.png)"
-  run_check "$case_dir" "$body" --ui "$VALID_URL" >/dev/null 2>&1
-  expect_code 0 $? "--ui body with <owner>/<repo>/assets URL should pass"
-  pass "fm-pr-body-check: --ui with <owner>/<repo>/assets URL passes"
 }
 
 # (h) Malformed PR URL fails fast without calling gh.
@@ -185,56 +202,258 @@ SH
   pass "fm-pr-body-check: gh fetch failure fails loudly"
 }
 
-# (l) --ui body with a github.com/<owner>/<repo>/raw/<sha>/<path> URL passes.
-# These are commit-sha raw URLs: they render inline for authenticated repo members
-# on both public and private repos, unlike raw.githubusercontent.com which 404s on private repos.
+# --- substance checks -------------------------------------------------------
+
+# (s1) A real no-mistakes pipeline-default body fails: it leads with ## Intent
+# and never states the requirement, so it fails the lead-with-requirement check.
+test_pipeline_default_body_fails() {
+  local case_dir err rc
+  case_dir=$(make_case pipeline-default)
+  local body="## Intent
+Add the seed loader.
+
+## What Changed
+Wired up the loader and guidance rendering.
+
+## Risk Assessment
+Low.
+
+## Testing
+verified seed load and guidance rendering
+
+## Pipeline
+Ran the gate; all green."
+  err=$(run_check "$case_dir" "$body" "$VALID_URL" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "pipeline-default body should fail but passed"
+  assert_contains "$err" "requirement" "should flag the missing requirement lead"
+  pass "fm-pr-body-check: pipeline-default body fails"
+}
+
+# (s2) Leads with a requirement but uses the pipeline section names, so the
+# distinctive canonical sections (How it works / Evidence / Links) are missing.
+test_pipeline_section_names_fail() {
+  local case_dir err rc
+  case_dir=$(make_case pipeline-sections)
+  local body="**Requirement:** Load the seed data on boot.
+
+## Intent
+Add the seed loader.
+
+## What Changed
+Wired it up.
+
+## Testing
+| Suite | What | Result | Command |
+|-------|------|--------|---------|
+| t.sh | it | pass | bash t.sh |
+
+## Pipeline
+green."
+  err=$(run_check "$case_dir" "$body" "$VALID_URL" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "pipeline section names should fail but passed"
+  assert_contains "$err" "missing canonical section" "should name the missing canonical sections"
+  pass "fm-pr-body-check: pipeline section names fail"
+}
+
+# (s3) A bare one-line body fails.
+test_bare_body_fails() {
+  local case_dir rc
+  case_dir=$(make_case bare)
+  local body="Fixes the login redirect bug."
+  run_check "$case_dir" "$body" "$VALID_URL" >/dev/null 2>&1; rc=$?
+  [ "$rc" -ne 0 ] || fail "bare one-line body should fail but passed"
+  pass "fm-pr-body-check: bare body fails"
+}
+
+# (s4) A canonical body with no fenced mermaid/erDiagram schematic fails.
+test_missing_mermaid_fails() {
+  local case_dir err rc
+  case_dir=$(make_case missing-mermaid)
+  local body='**Requirement:** Do the thing.
+
+## What changed
+Did it, but with no schematic.
+
+## How it works
+Given x, the result is y.
+
+## Evidence
+| Suite | What it guards | Result | Command |
+|-------|----------------|--------|---------|
+| t.sh | it works | pass | bash t.sh |
+
+## Risks
+None.
+
+## Links
+Follow-on to #1.'
+  err=$(run_check "$case_dir" "$body" "$VALID_URL" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "canonical body missing mermaid should fail but passed"
+  assert_contains "$err" "mermaid" "should flag the missing schematic"
+  pass "fm-pr-body-check: missing mermaid schematic fails"
+}
+
+# (s5) A canonical body whose Evidence is a lone vague claim fails.
+test_vague_evidence_fails() {
+  local case_dir err rc
+  case_dir=$(make_case vague-evidence)
+  local body='**Requirement:** Do the thing.
+
+## What changed
+Did it.
+
+```mermaid
+flowchart LR
+  a --> b
+```
+
+## How it works
+Given x, the result is y.
+
+## Evidence
+verified seed load and guidance rendering
+
+## Risks
+None.
+
+## Links
+Follow-on to #1.'
+  err=$(run_check "$case_dir" "$body" "$VALID_URL" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "vague Evidence should fail but passed"
+  assert_contains "$err" "vague claim" "should flag the unsubstantiated Evidence"
+  pass "fm-pr-body-check: vague Evidence claim fails"
+}
+
+# (s6) A canonical body with a substantiated-but-tableless Evidence still fails
+# the "at least one table" requirement.
+test_no_table_fails() {
+  local case_dir err rc
+  case_dir=$(make_case no-table)
+  local body='**Requirement:** Do the thing.
+
+## What changed
+Did it.
+
+```mermaid
+flowchart LR
+  a --> b
+```
+
+## How it works
+Given x, the result is y.
+
+## Evidence
+<details><summary>run log</summary>
+ran the suite, all green
+</details>
+
+## Risks
+None.
+
+## Links
+Follow-on to #1.'
+  err=$(run_check "$case_dir" "$body" "$VALID_URL" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "body with no table should fail but passed"
+  assert_contains "$err" "Testing/Evidence table" "should flag the missing table"
+  pass "fm-pr-body-check: body with no table fails"
+}
+
+# (s7) --ui body with an inline image but no | Before | After | table fails.
+test_ui_no_before_after_table_fails() {
+  local case_dir err rc
+  case_dir=$(make_case ui-no-comparison)
+  local body="![after](https://github.com/owner/repo/raw/abc1234/docs/pr-screenshots/t1/after.png)
+
+Some notes, but no comparison table."
+  err=$(run_check "$case_dir" "$body" --ui "$VALID_URL" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "--ui body with no Before/After table should fail but passed"
+  assert_contains "$err" "Before | After" "should require the comparison table"
+  pass "fm-pr-body-check: --ui with no Before/After table fails"
+}
+
+# --- canonical passes -------------------------------------------------------
+
+# (a) Full canonical body passes (no --ui).
+test_canonical_body_passes() {
+  local case_dir
+  case_dir=$(make_case canonical)
+  run_check "$case_dir" "$(canonical_body)" "$VALID_URL" >/dev/null 2>&1
+  expect_code 0 $? "canonical body should pass"
+  pass "fm-pr-body-check: canonical body passes"
+}
+
+# (l) --ui canonical body with github.com/<owner>/<repo>/raw/<sha>/<path> URLs passes.
 test_ui_raw_sha_url_passes() {
   local case_dir
   case_dir=$(make_case ui-raw-sha)
-  local body="| Before | After |
-|--------|-------|
-| ![before](https://github.com/owner/repo/raw/abc1234def5678/docs/pr-screenshots/task-t1/before.png) | ![after](https://github.com/owner/repo/raw/abc1234def5678/docs/pr-screenshots/task-t1/after.png) |"
-  run_check "$case_dir" "$body" --ui "$VALID_URL" >/dev/null 2>&1
-  expect_code 0 $? "--ui body with github.com/<owner>/<repo>/raw/<sha>/... URL should pass"
-  pass "fm-pr-body-check: --ui with github.com/<owner>/<repo>/raw/<sha>/<path> URL passes"
+  run_check "$case_dir" "$(canonical_body)" --ui "$VALID_URL" >/dev/null 2>&1
+  expect_code 0 $? "--ui canonical body with raw/<sha> URLs should pass"
+  pass "fm-pr-body-check: --ui canonical raw/<sha> URLs pass"
 }
 
-# (m) Body with a #N reference passes without a thread-link warning.
+# (f) --ui canonical body with user-attachments/assets URLs passes.
+test_ui_user_attachments_passes() {
+  local case_dir body
+  case_dir=$(make_case ui-user-attachments)
+  body=$(canonical_body 'Follow-on to #7.' \
+    'https://github.com/user-attachments/assets/abc-before.png' \
+    'https://github.com/user-attachments/assets/abc-after.png')
+  run_check "$case_dir" "$body" --ui "$VALID_URL" >/dev/null 2>&1
+  expect_code 0 $? "--ui canonical body with user-attachments URLs should pass"
+  pass "fm-pr-body-check: --ui user-attachments URLs pass"
+}
+
+# (g) --ui canonical body with <owner>/<repo>/assets URLs passes.
+test_ui_repo_assets_passes() {
+  local case_dir body
+  case_dir=$(make_case ui-repo-assets)
+  body=$(canonical_body 'Follow-on to #8.' \
+    'https://github.com/owner/repo/assets/12345/before.png' \
+    'https://github.com/owner/repo/assets/12345/after.png')
+  run_check "$case_dir" "$body" --ui "$VALID_URL" >/dev/null 2>&1
+  expect_code 0 $? "--ui canonical body with <owner>/<repo>/assets URLs should pass"
+  pass "fm-pr-body-check: --ui <owner>/<repo>/assets URLs pass"
+}
+
+# (m) Canonical body with a #N reference passes without a thread-link warning.
 test_body_with_issue_ref_no_warning() {
   local case_dir out
   case_dir=$(make_case issue-ref)
-  local body="Follow-on to #42. Fixes the screenshot bug from #41."
-  out=$(run_check "$case_dir" "$body" "$VALID_URL" 2>&1)
-  expect_code 0 $? "body with #N reference should pass"
+  out=$(run_check "$case_dir" "$(canonical_body 'Follow-on to #42.')" "$VALID_URL" 2>&1)
+  expect_code 0 $? "canonical body with #N reference should pass"
   assert_not_contains "$out" "warning" "body with #N ref should not warn"
-  pass "fm-pr-body-check: body with #N reference passes without warning"
+  pass "fm-pr-body-check: canonical body with #N reference passes without warning"
 }
 
-# (n) Body with no thread link at all exits 0 but emits a warning.
+# (n) Canonical body with no thread link exits 0 but emits a warning.
 test_body_no_thread_link_warns() {
   local case_dir out rc
   case_dir=$(make_case no-thread-link)
-  local body="## Summary
-
-This change satisfies the login redirect requirement."
-  out=$(run_check "$case_dir" "$body" "$VALID_URL" 2>&1); rc=$?
+  out=$(run_check "$case_dir" "$(canonical_body 'Standalone change, no parent.')" "$VALID_URL" 2>&1); rc=$?
   expect_code 0 $rc "no thread link should exit 0 (lenient warning, not failure)"
   assert_contains "$out" "warning" "no thread link should emit a warning"
   assert_contains "$out" "thread link" "warning should name the problem"
   pass "fm-pr-body-check: no thread link exits 0 with warning"
 }
 
-test_clean_body_passes
 test_var_folders_path_fails
 test_ui_no_images_fails
 test_raw_githubusercontent_fails
 test_ui_blob_link_only_fails
-test_ui_user_attachments_passes
-test_ui_repo_assets_passes
 test_malformed_url_fails
 test_private_tmp_path_fails
 test_users_image_path_fails
 test_gh_fetch_failure_fails
+test_pipeline_default_body_fails
+test_pipeline_section_names_fail
+test_bare_body_fails
+test_missing_mermaid_fails
+test_vague_evidence_fails
+test_no_table_fails
+test_ui_no_before_after_table_fails
+test_canonical_body_passes
 test_ui_raw_sha_url_passes
+test_ui_user_attachments_passes
+test_ui_repo_assets_passes
 test_body_with_issue_ref_no_warning
 test_body_no_thread_link_warns
