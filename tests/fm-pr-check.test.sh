@@ -121,6 +121,22 @@ test_canonical_body_passes_and_arms() {
   pass "fm-pr-check: canonical body passes, poll armed and pr= recorded"
 }
 
+# (4) FM_PR_CHECK_SKIP_BODY_GATE=1 bypasses the gate: a bare body passes, pr= is
+# recorded, and the merge poll is armed. This is the merge-recording path that
+# fm-pr-merge.sh uses after the captain already cleared the relay gate.
+test_skip_env_bypasses_gate() {
+  local home out rc
+  home=$(make_case skip)
+  out=$(FM_PR_CHECK_SKIP_BODY_GATE=1 FM_TEST_PR_BODY="Fixes the login redirect bug." \
+    FM_HOME="$home" PATH="$home/fakebin:$PATH" "$CHECK" "$ID" "$VALID_URL" 2>&1); rc=$?
+  expect_code 0 $rc "bare body should pass when the gate is skipped"
+  assert_present "$home/state/$ID.check.sh" "merge poll must be armed when the gate is skipped"
+  assert_grep "pr=$VALID_URL" "$home/state/$ID.meta" "pr= must be recorded when the gate is skipped"
+  assert_contains "$out" "armed" "should report the poll was armed"
+  pass "fm-pr-check: FM_PR_CHECK_SKIP_BODY_GATE=1 bypasses the gate"
+}
+
 test_bare_body_fails_and_no_arm
 test_pipeline_default_fails_and_no_arm
 test_canonical_body_passes_and_arms
+test_skip_env_bypasses_gate
