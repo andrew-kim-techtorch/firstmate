@@ -79,7 +79,8 @@ reject_repo_overrides() {
 parse_pr_url "$URL" || exit 1
 reject_repo_overrides "$@" || exit 1
 
-"$SCRIPT_DIR/fm-pr-check.sh" "$ID" "$URL"
+# Record pr= only; the captain already approved, so skip the relay-path body gate.
+FM_PR_CHECK_SKIP_BODY_GATE=1 "$SCRIPT_DIR/fm-pr-check.sh" "$ID" "$URL"
 grep -qxF "pr=$URL" "$META" || { echo "error: fm-pr-check did not record pr=$URL in $META; refusing to merge" >&2; exit 1; }
 
 merge_args=()
