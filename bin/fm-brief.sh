@@ -243,6 +243,11 @@ The canonical PR body has these sections, in order: **Requirement** (the lead), 
 `bin/fm-pr-body-check.sh` enforces this on substance, not just heading presence: a bare or pipeline-default body fails.
 The full spec lives in `data/notes/pr-body-template.md`; the filled reference below is the exact quality bar to match.
 
+Mermaid-safe authoring: GitHub silently renders a broken diagram as "Unable to render rich display" instead of failing loudly, so `bin/fm-pr-body-check.sh` lints every fenced mermaid block for the shapes that trigger it.
+Quote every node and edge label (`id["like this"]`, `-->|"like this"|`), never leave one bare unless it is plain alnum/space text.
+Use `<br/>` for a line break inside a label, never a literal `\n`.
+Avoid raw `()[]<>&=` inside an unquoted label - reword or quote it instead.
+
 REQUIRED FINAL STEP for PR-based ship tasks - not optional: the no-mistakes pipeline generates its OWN default body (`## Intent` / `## What Changed` / `## Risk Assessment` / `## Testing` / `## Pipeline`), which overwrites any canonical body you wrote. After the pipeline finishes and before you report the PR ready, you MUST rewrite the PR body to the canonical template with `gh-axi pr edit`, preserving the auto-appended `## Pipeline` footer verbatim at the end. (direct-PR: author the body to this template from the start; there is no pipeline default to replace.)
 
 Filled reference PR body - match this substance (real schematic, real worked example, populated tables), not just the headings:

@@ -118,6 +118,74 @@ if ! printf '%s' "$BODY" | grep -qE '^[[:space:]]*```[[:space:]]*(mermaid|erDiag
   exit 1
 fi
 
+# --- Mermaid safety: a fence that PARSES, not just exists. ---
+# GitHub's renderer silently shows "Unable to render rich display" on a broken
+# diagram, so a body can pass the presence check above and still ship broken.
+# Layer 1 (always on): a conservative pattern linter for the known-bad shapes -
+# unquoted special chars in a label, and a literal \n instead of <br/>.
+# It only flags a label when the FIRST character inside the delimiter is plain
+# text, so legitimate double-delimiter shapes (cylinder [(...)], stadium
+# ([...]), subroutine [[...]], hexagon {{...}}) and fully-quoted labels never
+# false-positive; it can still miss a bad label buried past a quoted prefix,
+# which is the deliberate false-negative bias this linter takes.
+MERMAID_TMP=$(mktemp -d "${TMPDIR:-/tmp}/fm-pr-body-mermaid.XXXXXX")
+trap 'rm -rf "$MERMAID_TMP"' EXIT
+
+MERMAID_LINT_ERR=$(printf '%s\n' "$BODY" | awk -v outdir="$MERMAID_TMP" '
+  BEGIN { in_block = 0; ln = 0; blk = 0 }
+  {
+    ln++
+    line = $0
+    if (in_block) {
+      if (line ~ /^[[:space:]]*```[[:space:]]*$/) { in_block = 0; close(outfile); next }
+      print line >> outfile
+      if (line ~ /\\n/) {
+        printf("line %d: literal backslash-n found - use <br/> for a line break: %s\n", ln, line)
+      }
+      if (line ~ /\[[^]"(][^]"]*[()<>&=][^]]*\]/) {
+        printf("line %d: unquoted special character in a [label] - quote it: %s\n", ln, line)
+      }
+      if (line ~ /\([^)"[][^)"]*[][<>&=][^)]*\)/) {
+        printf("line %d: unquoted special character in a (label) - quote it: %s\n", ln, line)
+      }
+      if (line ~ /\{[^}"{][^}"]*[()<>&=][^}]*\}/) {
+        printf("line %d: unquoted special character in a {label} - quote it: %s\n", ln, line)
+      }
+      if (line ~ /\|[^|"][^|"]*[()<>&=][^|]*\|/) {
+        printf("line %d: unquoted special character in an |edge label| - quote it: %s\n", ln, line)
+      }
+      next
+    }
+    if (line ~ /^[[:space:]]*```[[:space:]]*(mermaid|erDiagram)/) {
+      in_block = 1
+      blk++
+      outfile = outdir "/block" blk ".mmd"
+      printf "" > outfile
+    }
+  }
+')
+if [ -n "$MERMAID_LINT_ERR" ]; then
+  printf 'error: PR body has an unsafe mermaid diagram (renders "Unable to render rich display" on GitHub):\n%s\n' "$MERMAID_LINT_ERR" >&2
+  exit 1
+fi
+
+# Layer 2 (optional, authoritative): actually parse each block when a mermaid
+# CLI is on PATH. Skips cleanly when mmdc is absent so the check still works
+# without it - this is a bonus gate, not a hard dependency.
+if command -v mmdc >/dev/null 2>&1; then
+  MMDC_ERR=
+  for f in "$MERMAID_TMP"/block*.mmd; do
+    [ -e "$f" ] || continue
+    if ! mmdc -i "$f" -o "$f.svg" >/dev/null 2>"$f.err"; then
+      MMDC_ERR="${MMDC_ERR:+$MMDC_ERR$(printf '\n')}$(basename "$f"): $(head -n 1 "$f.err" 2>/dev/null)"
+    fi
+  done
+  if [ -n "$MMDC_ERR" ]; then
+    printf 'error: mermaid diagram failed to parse (mmdc):\n%s\n' "$MMDC_ERR" >&2
+    exit 1
+  fi
+fi
+
 # The Evidence section must be substantiated inline, not a lone vague claim
 # like "verified seed load and guidance rendering" - require a table row,
 # a <details> block, or command/code output within the section body.

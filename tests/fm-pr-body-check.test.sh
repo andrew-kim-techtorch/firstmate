@@ -21,6 +21,10 @@
 #   (s5) a canonical body whose Evidence is a lone vague claim fails
 #   (s6) a canonical body with no Testing/Evidence table fails
 #   (s7) --ui canonical-ish body with an inline image but no Before/After table fails
+#   Mermaid safety (new):
+#   (s8) an unquoted "(NEW)" in a mermaid edge label fails, naming the line
+#   (s9) a literal \n in a mermaid label fails, naming the line
+#   (s10) mmdc present on PATH and it errors on the block fails the check
 #   Canonical passes:
 #   (a) full canonical body passes (no --ui)
 #   (l) --ui canonical body with github.com/<owner>/<repo>/raw/<sha>/<path> URLs passes
@@ -28,6 +32,8 @@
 #   (g) --ui canonical body with <owner>/<repo>/assets URLs passes
 #   (m) canonical body with a #N reference passes without a thread-link warning
 #   (n) canonical body with no thread link exits 0 but emits a warning
+#   (o) canonical body's own cylinder-shape, fully-quoted diagram is not a false positive
+#   (p) mmdc present on PATH and it succeeds does not block a valid diagram
 set -u
 
 # shellcheck source=tests/lib.sh
@@ -371,6 +377,142 @@ Some notes, but no comparison table."
   pass "fm-pr-body-check: --ui with no Before/After table fails"
 }
 
+# --- mermaid safety ----------------------------------------------------------
+
+# (s8) An unquoted "(NEW)" in a mermaid edge label fails, naming the line.
+test_mermaid_unquoted_paren_edge_label_fails() {
+  local case_dir err rc
+  case_dir=$(make_case mermaid-unquoted-paren)
+  local body='**Requirement:** Do the thing.
+
+## What changed
+Did it.
+
+```mermaid
+flowchart LR
+  old[Old System] -->|Migrate to (NEW) system| new[New System]
+```
+
+## How it works
+Given x, the result is y.
+
+## Evidence
+| Suite | What it guards | Result | Command |
+|-------|----------------|--------|---------|
+| t.sh | it works | pass | bash t.sh |
+
+## Risks
+None.
+
+## Links
+Follow-on to #1.'
+  err=$(run_check "$case_dir" "$body" "$VALID_URL" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "unquoted (NEW) in an edge label should fail but passed"
+  assert_contains "$err" "unsafe mermaid diagram" "should name the mermaid problem"
+  assert_contains "$err" "edge label" "should point at the edge label"
+  pass "fm-pr-body-check: unquoted paren in mermaid edge label fails"
+}
+
+# (s9) A literal \n in a mermaid label fails, naming the line.
+test_mermaid_literal_newline_fails() {
+  local case_dir err rc
+  case_dir=$(make_case mermaid-literal-newline)
+  local body='**Requirement:** Do the thing.
+
+## What changed
+Did it.
+
+```mermaid
+flowchart LR
+  a[Line one\nLine two] --> b[Done]
+```
+
+## How it works
+Given x, the result is y.
+
+## Evidence
+| Suite | What it guards | Result | Command |
+|-------|----------------|--------|---------|
+| t.sh | it works | pass | bash t.sh |
+
+## Risks
+None.
+
+## Links
+Follow-on to #1.'
+  err=$(run_check "$case_dir" "$body" "$VALID_URL" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "literal backslash-n should fail but passed"
+  assert_contains "$err" "literal backslash-n" "should name the literal backslash-n"
+  pass "fm-pr-body-check: literal backslash-n in mermaid label fails"
+}
+
+# (o) The canonical reference body's cylinder-shape, fully-quoted diagram
+# (the one bin/fm-brief.sh emits) must not be a false positive.
+test_cylinder_shape_no_false_positive() {
+  local case_dir rc
+  case_dir=$(make_case cylinder-shape)
+  local body='**Requirement:** Do the thing.
+
+## What changed
+Did it, read alongside the schematic below.
+
+```mermaid
+flowchart LR
+  caller["caller (entry)"] --> fn["changed function"]
+  fn --> store[("data store")]
+  fn -->|"ok (200)"| resp["response"]
+```
+
+## How it works
+Given x, the result is y.
+
+## Evidence
+| Suite | What it guards | Result | Command |
+|-------|----------------|--------|---------|
+| t.sh | it works | pass | bash t.sh |
+
+## Risks
+None.
+
+## Links
+Follow-on to #1.'
+  run_check "$case_dir" "$body" "$VALID_URL" >/dev/null 2>&1; rc=$?
+  expect_code 0 "$rc" "cylinder-shape, fully-quoted diagram should pass"
+  pass "fm-pr-body-check: cylinder-shape quoted diagram is not a false positive"
+}
+
+# (s10) mmdc present on PATH and erroring on the block fails the check.
+test_mmdc_parse_failure_fails() {
+  local case_dir fakebin err rc
+  case_dir=$(make_case mmdc-parse-failure)
+  fakebin="$case_dir/fakebin"
+  cat > "$fakebin/mmdc" <<'SH'
+#!/usr/bin/env bash
+echo "Parse error on line 2" >&2
+exit 1
+SH
+  chmod +x "$fakebin/mmdc"
+  err=$(run_check "$case_dir" "$(canonical_body)" "$VALID_URL" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "mmdc parse failure should fail the check but passed"
+  assert_contains "$err" "mmdc" "should name the mmdc gate"
+  pass "fm-pr-body-check: mmdc parse failure fails the check"
+}
+
+# (p) mmdc present on PATH and succeeding does not block a valid diagram.
+test_mmdc_parse_success_passes() {
+  local case_dir fakebin rc
+  case_dir=$(make_case mmdc-parse-success)
+  fakebin="$case_dir/fakebin"
+  cat > "$fakebin/mmdc" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+  chmod +x "$fakebin/mmdc"
+  run_check "$case_dir" "$(canonical_body)" "$VALID_URL" >/dev/null 2>&1; rc=$?
+  expect_code 0 "$rc" "mmdc parse success should not block a valid diagram"
+  pass "fm-pr-body-check: mmdc parse success passes"
+}
+
 # --- canonical passes -------------------------------------------------------
 
 # (a) Full canonical body passes (no --ui).
@@ -451,6 +593,11 @@ test_missing_mermaid_fails
 test_vague_evidence_fails
 test_no_table_fails
 test_ui_no_before_after_table_fails
+test_mermaid_unquoted_paren_edge_label_fails
+test_mermaid_literal_newline_fails
+test_cylinder_shape_no_false_positive
+test_mmdc_parse_failure_fails
+test_mmdc_parse_success_passes
 test_canonical_body_passes
 test_ui_raw_sha_url_passes
 test_ui_user_attachments_passes
