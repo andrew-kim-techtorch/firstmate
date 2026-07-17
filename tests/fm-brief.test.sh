@@ -114,6 +114,8 @@ test_pr_based_brief_carries_reference_and_rebuild_step() {
     assert_grep "| Suite | What it guards | Result | Command |" "$brief" \
       "$id: filled reference lost the Testing suite table"
     assert_grep "**Requirement:**" "$brief" "$id: filled reference lost the Requirement lead"
+    assert_grep "Mermaid-safe authoring" "$brief" "$id: brief lost the mermaid-safe authoring rules"
+    assert_grep '<br/>' "$brief" "$id: mermaid-safe rules lost the <br/> guidance"
   done
   pass "fm-brief.sh: PR-based briefs carry the filled reference and post-pipeline rewrite step"
 }
