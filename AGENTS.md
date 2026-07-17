@@ -414,6 +414,7 @@ cd projects/<name> && no-mistakes init && no-mistakes doctor
 It does **not** vendor any skill into the project - the no-mistakes skill is user-level now, available to every crewmate without a per-project copy.
 So init produces nothing to commit; it is a sanctioned exception to the never-write rule (section 1) only in that it runs git remote/config setup inside the project.
 Touch nothing else.
+Immediately after init, from the firstmate home root, repair the freshly generated gate hook if it regenerated with the upstream `$(pwd)` gate-path bug (`bin/fm-gate-hook-check.sh`; the fuller self-heal explanation lives in `bin/fm-gate-hook-lib.sh`, and bootstrap runs the same check every session as a backstop).
 `direct-PR` and `local-only` projects skip init entirely - they do not run the pipeline (`local-only` has no remote at all).
 
 If `no-mistakes doctor` reports problems, fix the environment (auth, daemon) before dispatching work to that project.
