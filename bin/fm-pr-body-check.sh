@@ -186,11 +186,13 @@ if command -v mmdc >/dev/null 2>&1; then
   # a timeout when one is on PATH (macOS lacks `timeout` by default, but coreutils
   # ships `gtimeout`). A timeout (exit 124) is treated as an infra failure and
   # downgraded, never a hard fail, so a wedged Chromium can never stall the gate.
+  # Configurable via FM_MMDC_TIMEOUT_SECS for a slower CI sandbox or a faster fail.
+  MMDC_TIMEOUT_SECS="${FM_MMDC_TIMEOUT_SECS:-30}"
   MMDC_TIMEOUT=
   if command -v timeout >/dev/null 2>&1; then
-    MMDC_TIMEOUT="timeout 60"
+    MMDC_TIMEOUT="timeout $MMDC_TIMEOUT_SECS"
   elif command -v gtimeout >/dev/null 2>&1; then
-    MMDC_TIMEOUT="gtimeout 60"
+    MMDC_TIMEOUT="gtimeout $MMDC_TIMEOUT_SECS"
   fi
   for f in "$MERMAID_TMP"/block*.mmd; do
     [ -e "$f" ] || continue
@@ -202,7 +204,7 @@ if command -v mmdc >/dev/null 2>&1; then
     if [ "$rc" -ne 124 ] && grep -qiE "$PARSE_SIG" "$f.err" 2>/dev/null; then
       MMDC_PARSE_ERR="${MMDC_PARSE_ERR:+$MMDC_PARSE_ERR$(printf '\n')}$(basename "$f"): $line1"
     else
-      [ "$rc" -eq 124 ] && line1="timed out (mmdc hung; likely a broken headless Chromium)"
+      [ "$rc" -eq 124 ] && line1="timed out after ${MMDC_TIMEOUT_SECS}s (mmdc hung; likely a broken headless Chromium)"
       MMDC_INFRA_ERR="${MMDC_INFRA_ERR:+$MMDC_INFRA_ERR$(printf '\n')}$(basename "$f"): $line1"
     fi
   done
