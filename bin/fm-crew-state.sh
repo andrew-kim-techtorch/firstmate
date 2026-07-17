@@ -15,7 +15,7 @@
 # fixed mapping logic, no heuristics and no LLM. Output is one stable, parseable,
 # token-tight line firstmate can read every heartbeat:
 #
-#   state: <working|parked|done|blocked|failed|unknown> · source: <run-step|pane|status-log|none> · <detail>
+#   state: <working|parked|done|blocked|failed|usage-blocked|unknown> · source: <run-step|pane|status-log|none> · <detail>
 #
 # Logic, in order:
 #   1. Resolve worktree + backend target + kind from state/<id>.meta.
@@ -51,6 +51,8 @@ STATE="${FM_STATE_OVERRIDE:-$FM_HOME/state}"
 . "$SCRIPT_DIR/fm-tmux-lib.sh"
 # shellcheck source=bin/fm-backend.sh
 . "$SCRIPT_DIR/fm-backend.sh"
+# shellcheck source=bin/fm-classify-lib.sh
+. "$SCRIPT_DIR/fm-classify-lib.sh"  # fm_usage_limit_signature
 
 ID=${1:-}
 [ -n "$ID" ] || { echo "usage: fm-crew-state.sh <id>" >&2; exit 2; }
@@ -181,6 +183,41 @@ crew_pane_is_busy() {  # <target>
       esac
       ;;
   esac
+}
+
+# --- usage/session-limit detection -----------------------------------------
+# A crew account-capped by the Claude usage window is neither working nor a code
+# failure: its no-mistakes review/test sub-agents crash (exit status 1) and the
+# run reads failed, or the pane just stops with the "session limit · resets
+# <time>" dialog and reads stale. Both are misreads - a relaunch inherits the
+# same cap. capture_pane_tail + usage_block_or_return read the pane once and,
+# on the verified signature, short-circuit to a distinct usage-blocked state
+# (carrying any reset time) so recovery parks + retries at reset, not relaunch.
+
+# Bounded pane tail for the usage scan, backend-aware like crew_pane_is_busy.
+capture_pane_tail() {  # <target> [lines]
+  local n=${2:-60}
+  case "$TASK_BACKEND" in
+    tmux) tmux capture-pane -p -t "$1" -S -"$n" 2>/dev/null ;;
+    *)    fm_backend_capture "$TASK_BACKEND" "$1" "$n" "$EXPECTED_LABEL" 2>/dev/null ;;
+  esac
+}
+
+# If <target>'s pane shows the usage/session-limit signature, emit usage-blocked
+# and exit (emit never returns). Read-only. A blank target or unreadable pane is
+# a no-op so callers fall through to their normal verdict.
+usage_block_or_return() {  # <target>
+  local target=$1 text reset detail
+  [ -n "$target" ] || return 0
+  text=$(capture_pane_tail "$target") || return 0
+  [ -n "$text" ] || return 0
+  reset=$(fm_usage_limit_signature "$text") || return 0
+  if [ -n "$reset" ]; then
+    detail="resets $reset"
+  else
+    detail="usage/session limit reached (no reset time shown)"
+  fi
+  emit usage-blocked pane "$detail"
 }
 
 # --- no-mistakes run lookup (authoritative when a run matches this branch) --
@@ -539,6 +576,14 @@ if [ "$HAVE_RUN" = 1 ]; then
       ;;
   esac
 
+  # A "failed" run-step is the classic Claude usage-cap misread: the review/test
+  # sub-agents crashed (exit status 1) and no-mistakes marked the run failed, but
+  # the work is intact and a relaunch inherits the same cap. If the pane shows the
+  # usage-limit signature, report usage-blocked instead of failed.
+  if [ "$RUN_STATE" = failed ]; then
+    usage_block_or_return "$BACKEND_TARGET"
+  fi
+
   emit "$RUN_STATE" run-step "$RUN_DETAIL"
 fi
 
@@ -549,6 +594,11 @@ fi
 # unknown rather than trusting a possibly-stale status log as the current state.
 [ -n "$BACKEND_TARGET" ] || emit unknown none "no backend target recorded"
 pane_readable "$BACKEND_TARGET" || emit unknown none "backend target gone: $BACKEND_TARGET"
+
+# A usage/session-limit banner in the pane means the crew is account-capped, not
+# genuinely idle/stale: report usage-blocked (with any reset time) before the
+# busy/log fallback, so recovery parks + retries at reset rather than relaunch.
+usage_block_or_return "$BACKEND_TARGET"
 
 # Secondmates idle on their own watcher (idle pane = healthy), so the busy
 # signature is not meaningful for them; read their state from the status log only.
