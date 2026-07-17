@@ -85,7 +85,8 @@ case "${1:-}" in
     printf '%%1\n' ;;
   capture-pane)
     [ "${FM_FAKE_TMUX_MISSING:-0}" = 1 ] && exit 1
-    if [ "${FM_FAKE_BUSY:-0}" = 1 ]; then printf 'work in progress\nesc to interrupt\n'
+    if [ -n "${FM_FAKE_USAGE_BANNER:-}" ]; then printf '%s\n' "$FM_FAKE_USAGE_BANNER"
+    elif [ "${FM_FAKE_BUSY:-0}" = 1 ]; then printf 'work in progress\nesc to interrupt\n'
     else printf 'all quiet\n> \n'; fi ;;
 esac
 exit 0
@@ -159,8 +160,9 @@ reset_fakes() {
   FM_FAKE_HERDR_MISSING=0
   FM_FAKE_HERDR_AGENT_STATUS=""
   FM_FAKE_CI_LOGS=""
+  FM_FAKE_USAGE_BANNER=""
   export FM_FAKE_AXI_STATUS FM_FAKE_AXI_STATUS_RUN FM_FAKE_RUNS_LIST FM_FAKE_BUSY FM_FAKE_TMUX_MISSING
-  export FM_FAKE_HERDR_BUSY FM_FAKE_HERDR_MISSING FM_FAKE_HERDR_AGENT_STATUS FM_FAKE_CI_LOGS
+  export FM_FAKE_HERDR_BUSY FM_FAKE_HERDR_MISSING FM_FAKE_HERDR_AGENT_STATUS FM_FAKE_CI_LOGS FM_FAKE_USAGE_BANNER
 }
 
 # --- run-object fixtures (TOON, as `no-mistakes axi status` emits) -----------
@@ -673,6 +675,105 @@ test_terminal_failed() {
   pass "terminal failed run is authoritative"
 }
 
+# --- usage/session-limit detection ------------------------------------------
+# The VERIFIED Claude cap signature (learnings 2026-07-07): a pane dialog
+# "You've hit your session limit · resets <time>" plus review/test sub-agents
+# crashing with `claude exited: exit status 1`. fm-crew-state must report a
+# DISTINCT usage-blocked state (not stale/failed) so recovery parks + retries at
+# reset instead of relaunching into the same account cap.
+CLAUDE_LIMIT_BANNER="You've hit your session limit · resets 5:30pm (America/Chicago)"
+
+# (u1) no run + a usage-limit dialog in the pane -> usage-blocked, reset captured
+test_usage_blocked_pane_no_run() {
+  reset_fakes
+  local d; d=$(new_case usage-pane)
+  make_repo_on_branch "$d/wt" fm/feat-u1
+  make_fakebin "$d" >/dev/null
+  fm_write_meta "$d/state/feat-u1.meta" "window=fm:fm-feat-u1" "worktree=$d/wt" "kind=ship"
+  FM_FAKE_AXI_STATUS=""
+  FM_FAKE_RUNS_LIST=""
+  FM_FAKE_USAGE_BANNER="$CLAUDE_LIMIT_BANNER"
+  local out; out=$(run_crew_state "$d" feat-u1)
+  assert_contains "$out" "state: usage-blocked" "usage dialog -> usage-blocked"
+  assert_contains "$out" "source: pane" "usage-blocked -> pane source"
+  assert_contains "$out" "resets 5:30pm (America/Chicago)" "usage-blocked captures the reset time"
+  assert_not_contains "$out" "state: unknown" "usage dialog is not misread as unknown/stale"
+  pass "usage-limit dialog in the pane reports usage-blocked with reset time"
+}
+
+# (u2) a FAILED run-step + the usage dialog -> usage-blocked, not failed. This is
+# the classic misread: sub-agents crash (exit status 1), no-mistakes marks the
+# run failed, but the cap is the real cause and the work is intact.
+test_usage_blocked_overrides_failed_run() {
+  reset_fakes
+  local d; d=$(new_case usage-failed-run)
+  make_repo_on_branch "$d/wt" fm/feat-u2
+  make_fakebin "$d" >/dev/null
+  fm_write_meta "$d/state/feat-u2.meta" "window=fm:fm-feat-u2" "worktree=$d/wt" "kind=ship"
+  FM_FAKE_AXI_STATUS="$(run_failed fm/feat-u2)"
+  FM_FAKE_USAGE_BANNER="$CLAUDE_LIMIT_BANNER"
+  local out; out=$(run_crew_state "$d" feat-u2)
+  assert_contains "$out" "state: usage-blocked" "failed run + usage dialog -> usage-blocked"
+  assert_not_contains "$out" "state: failed" "usage cap is not reported as a code failure"
+  pass "usage dialog overrides a failed run-step verdict"
+}
+
+# (u3) the /and-or/ path: no banner, but >=2 harness sub-agent exit-status-1
+# crashes in the pane -> usage-blocked (no reset time shown).
+test_usage_blocked_repeated_exit_status() {
+  reset_fakes
+  local d; d=$(new_case usage-exit-status)
+  make_repo_on_branch "$d/wt" fm/feat-u3
+  make_fakebin "$d" >/dev/null
+  fm_write_meta "$d/state/feat-u3.meta" "window=fm:fm-feat-u3" "worktree=$d/wt" "kind=ship"
+  FM_FAKE_AXI_STATUS=""
+  FM_FAKE_RUNS_LIST=""
+  FM_FAKE_USAGE_BANNER=$(printf 'review step\nclaude exited: exit status 1\ntest step\nclaude exited: exit status 1\n')
+  local out; out=$(run_crew_state "$d" feat-u3)
+  assert_contains "$out" "state: usage-blocked" "repeated harness exit-1 -> usage-blocked"
+  assert_contains "$out" "no reset time shown" "no banner reset -> detail notes it"
+  pass "repeated harness exit-status-1 crashes report usage-blocked"
+}
+
+# (u4) not-a-false-positive: a failed run whose pane shows a single ORDINARY
+# "exit status 1" (an unrelated build failure, no harness prefix) must stay
+# failed - the exit-1 heuristic requires a named harness and >=2 crashes.
+test_usage_not_false_positive_on_plain_exit() {
+  reset_fakes
+  local d; d=$(new_case usage-noise)
+  make_repo_on_branch "$d/wt" fm/feat-u4
+  make_fakebin "$d" >/dev/null
+  fm_write_meta "$d/state/feat-u4.meta" "window=fm:fm-feat-u4" "worktree=$d/wt" "kind=ship"
+  FM_FAKE_AXI_STATUS="$(run_failed fm/feat-u4)"
+  FM_FAKE_USAGE_BANNER=$(printf 'make: *** [build] Error 1\nexit status 1\n')
+  local out; out=$(run_crew_state "$d" feat-u4)
+  assert_contains "$out" "state: failed" "ordinary exit status 1 stays failed"
+  assert_not_contains "$out" "usage-blocked" "a plain build failure is not a usage cap"
+  pass "plain exit status 1 is not misread as a usage cap"
+}
+
+# The pure classifier signature itself (fm_usage_limit_signature, from
+# bin/fm-classify-lib.sh): banner match echoes the reset tail, the exit-1 count
+# gate, and non-matches return non-zero with no output.
+test_usage_signature_pure() {
+  local reset rc
+  reset=$(fm_usage_limit_signature "$CLAUDE_LIMIT_BANNER"); rc=$?
+  expect_code 0 "$rc" "banner matches the signature"
+  [ "$reset" = "5:30pm (America/Chicago)" ] || fail "reset tail wrong: '$reset'"
+
+  reset=$(fm_usage_limit_signature "usage limit reached"); rc=$?
+  expect_code 0 "$rc" "'usage limit' matches"
+  [ -z "$reset" ] || fail "no-reset banner should echo empty, got '$reset'"
+
+  fm_usage_limit_signature "$(printf 'claude exited: exit status 1\nclaude exited: exit status 1\n')" \
+    || fail "two harness exit-1 crashes should match"
+  fm_usage_limit_signature "claude exited: exit status 1" \
+    && fail "a single harness exit-1 crash must NOT match"
+  fm_usage_limit_signature "all quiet, no problems here" \
+    && fail "benign pane text must not match the usage signature"
+  pass "fm_usage_limit_signature matches banners and repeated harness exits only"
+}
+
 # (e) cross-branch attribution: `axi status` returns ANOTHER branch's run (the
 # routine case once more than one crew validates the same underlying repo
 # concurrently - they share ONE no-mistakes repo registration), so the helper
@@ -1068,6 +1169,11 @@ test_top_level_fixing_ci_running_after_green_stays_working
 test_top_level_fixing_done_log_stays_working
 test_terminal_passed
 test_terminal_failed
+test_usage_blocked_pane_no_run
+test_usage_blocked_overrides_failed_run
+test_usage_blocked_repeated_exit_status
+test_usage_not_false_positive_on_plain_exit
+test_usage_signature_pure
 test_cross_branch_attribution_via_runs_list
 test_cross_branch_attribution_picks_most_recent_row
 test_coarse_run_does_not_probe_other_branch_ci_log_for_ready_status

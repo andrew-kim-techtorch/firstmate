@@ -52,6 +52,50 @@ status_is_captain_relevant() {
   printf '%s' "$line" | grep -qiE "${FM_CAPTAIN_RE:-$FM_CLASSIFY_CAPTAIN_RE_DEFAULT}"
 }
 
+# --- usage/session-limit signature (harness account cap) --------------------
+# A crew blocked by the Claude account usage cap is NOT stale or a code failure:
+# its work is intact and a relaunch only inherits the same account cap. The
+# VERIFIED Claude signature (learnings 2026-07-07, re-confirmed 2026-07-11) is a
+# pane dialog "You've hit your session limit · resets <time>" together with its
+# no-mistakes review/test sub-agents crashing (`claude exited: exit status 1`).
+# fm_usage_limit_signature detects that from captured pane text so fm-crew-state
+# can report a distinct usage-blocked state instead of misreading it as failed
+# or stale. Grounded only in what has been observed: a "(session|usage) limit"
+# banner, OR >=2 harness sub-agent exit-status-1 crashes in the same capture (a
+# bare shell "exit status 1" from an ordinary build failure does NOT match - the
+# pattern requires a named harness). FM_USAGE_LIMIT_RE / FM_USAGE_LIMIT_EXIT_RE
+# override the two signatures for a home whose harness prints different text.
+FM_USAGE_LIMIT_RE_DEFAULT='(session|usage) limit'
+FM_USAGE_LIMIT_EXIT_RE_DEFAULT='(claude|codex|opencode|pi|grok) exited: exit status 1'
+
+# Echo the captured reset-time string (empty when the banner shows none) and
+# return 0 if <text> carries a usage/session-limit signature; return 1 (no
+# output) otherwise. Pure: reads only its argument.
+fm_usage_limit_signature() {  # <text>
+  local text=$1 banner_re exit_re reset n matched=0
+  banner_re=${FM_USAGE_LIMIT_RE:-$FM_USAGE_LIMIT_RE_DEFAULT}
+  exit_re=${FM_USAGE_LIMIT_EXIT_RE:-$FM_USAGE_LIMIT_EXIT_RE_DEFAULT}
+  if printf '%s\n' "$text" | grep -qiE "$banner_re"; then
+    matched=1
+  else
+    n=$(printf '%s\n' "$text" | grep -ciE "$exit_re")
+    [ "${n:-0}" -ge 2 ] && matched=1
+  fi
+  [ "$matched" = 1 ] || return 1
+  # Capture the reset time when the banner prints one: everything after the
+  # "resets" keyword to end of line (the Claude banner puts it last). Trim
+  # whitespace and any trailing composer-border glyph. Deliberately avoids a
+  # multibyte separator class (the "·" in the banner) for bash 3.2 / locale
+  # safety - the reset value is the line tail, so no separator is needed.
+  reset=$(printf '%s\n' "$text" | sed -n 's/.*[Rr]esets[[:space:]][[:space:]]*//p' | head -1)
+  reset=${reset//│/}
+  reset=${reset//|/}
+  reset="${reset#"${reset%%[![:space:]]*}"}"
+  reset="${reset%"${reset##*[![:space:]]}"}"
+  [ -n "$reset" ] && printf '%s' "$reset"
+  return 0
+}
+
 # task id from a recorded window target, falling back to the tmux-shaped
 # "<session>:fm-<id>" form when no metadata state is available.
 window_to_task() {
