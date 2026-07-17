@@ -90,14 +90,20 @@ for meta in "${METAS[@]}"; do
     cost=0
     tokens=0
   else
-    read -r cost tokens < <(jq -r '
+    cost=0
+    tokens=0
+    if parsed=$(jq -r '
       (.projects[0]."Cost (USD)" // 0) as $cost |
       ([.periods[0].models[]? |
         (."Input Tokens" // 0) + (."Output Tokens" // 0)
         + (."Cache Read Tokens" // 0) + (."Cache Write Tokens" // 0)
       ] | add // 0) as $tok |
       "\($cost) \($tok)"
-    ' "$export_json")
+    ' "$export_json" 2>"$TMP/$id.jqerr"); then
+      read -r cost tokens <<<"$parsed"
+    else
+      echo "fm-usage.sh: $id: usage parse failed: $(cat "$TMP/$id.jqerr")" >&2
+    fi
   fi
 
   printf '%-28s %-8s %-16s %14s %10s  %s\n' \
