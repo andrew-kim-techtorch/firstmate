@@ -122,7 +122,14 @@ fi
 # GitHub's renderer silently shows "Unable to render rich display" on a broken
 # diagram, so a body can pass the presence check above and still ship broken.
 # Layer 1 (always on): a conservative pattern linter for the known-bad shapes -
-# unquoted special chars in a label, and a literal \n instead of <br/>.
+# unquoted special chars in a label, a literal \n instead of <br/>, and a
+# reserved mermaid keyword (graph, end, subgraph, class, style, click,
+# linkStyle, direction, flowchart, classDef) used as a node id. A reserved
+# word is only flagged when it sits directly against a node-shape opener
+# ([({) or an edge (--> / ---) with no other identifier characters between -
+# that is the exact shape of "graph[...]" or "graph --> x", not "flowchart LR"
+# (keyword followed by a direction word) or "subgraph id[Title]" (keyword
+# followed by a separate id).
 # It only flags a label when the FIRST character inside the delimiter is plain
 # text, so legitimate double-delimiter shapes (cylinder [(...)], stadium
 # ([...]), subroutine [[...]], hexagon {{...}}) and fully-quoted labels never
@@ -154,6 +161,15 @@ MERMAID_LINT_ERR=$(printf '%s\n' "$BODY" | awk -v outdir="$MERMAID_TMP" '
       if (line ~ /\|[^|"][^|"]*[()<>&=][^|]*\|/) {
         printf("line %d: unquoted special character in an |edge label| - quote it: %s\n", ln, line)
       }
+      kwline = line
+      gsub(/"[^"]*"/, " ", kwline)
+      if (kwline ~ /(^|[^A-Za-z0-9_])(graph|end|subgraph|class|style|click|linkStyle|direction|flowchart|classDef)[[({]/ ||
+          kwline ~ /(^|[^A-Za-z0-9_])(graph|end|subgraph|class|style|click|linkStyle|direction|flowchart|classDef)[[:space:]]*(-->|---)/ ||
+          kwline ~ /(-->|---)[[:space:]]*(graph|end|subgraph|class|style|click|linkStyle|direction|flowchart|classDef)([^A-Za-z0-9_]|$)/) {
+        match(kwline, /(graph|end|subgraph|class|style|click|linkStyle|direction|flowchart|classDef)/)
+        kw = substr(kwline, RSTART, RLENGTH)
+        printf("line %d: reserved mermaid keyword \"%s\" used as a node id: rename it (e.g. \"ms%s\"): %s\n", ln, kw, kw, line)
+      }
       next
     }
     if (line ~ /^[[:space:]]*```[[:space:]]*(mermaid|erDiagram)/) {
@@ -169,16 +185,25 @@ if [ -n "$MERMAID_LINT_ERR" ]; then
   exit 1
 fi
 
-# Layer 2 (optional, authoritative): actually parse each block when a mermaid
-# CLI is on PATH. Skips cleanly when mmdc is absent so the check still works
-# without it - this is a bonus gate, not a hard dependency.
+# Layer 2 (optional, authoritative): actually parse each block with a real
+# mermaid parser. Prefers mmdc on PATH; falls back to `npx --yes
+# @mermaid-js/mermaid-cli` so the authoritative parse still runs on a machine
+# without a global mmdc install (no npx either: skip cleanly, same as before -
+# this is a bonus gate, not a hard dependency).
 # A non-zero mmdc exit is only trusted as a real defect when its stderr carries
 # a recognized mermaid parse-error signature. An installed-but-broken mmdc
 # (headless Chromium/puppeteer cannot launch, ENOENT, etc.), a hang that times
 # out, or any unrecognized output is downgraded to an advisory warning and
 # PASSES, so a misconfigured mmdc can never block this non-skippable PR-relay
 # gate. Layer 1 stays the always-on hard gate.
+# A global `mmdc` install makes this fast (no per-run npx package fetch).
+MMDC_CMD=
 if command -v mmdc >/dev/null 2>&1; then
+  MMDC_CMD="mmdc"
+elif command -v npx >/dev/null 2>&1; then
+  MMDC_CMD="npx --yes @mermaid-js/mermaid-cli"
+fi
+if [ -n "$MMDC_CMD" ]; then
   MMDC_PARSE_ERR=
   MMDC_INFRA_ERR=
   PARSE_SIG='Parse error|Expecting|Syntax error|Lexical error|UnknownDiagramError|No diagram type detected'
@@ -186,7 +211,8 @@ if command -v mmdc >/dev/null 2>&1; then
   # a timeout when one is on PATH (macOS lacks `timeout` by default, but coreutils
   # ships `gtimeout`). A timeout (exit 124) is treated as an infra failure and
   # downgraded, never a hard fail, so a wedged Chromium can never stall the gate.
-  # Configurable via FM_MMDC_TIMEOUT_SECS for a slower CI sandbox or a faster fail.
+  # Configurable via FM_MMDC_TIMEOUT_SECS for a slower CI sandbox or a faster fail;
+  # the npx fallback may need a larger value on a cold cache (first-run package fetch).
   MMDC_TIMEOUT_SECS="${FM_MMDC_TIMEOUT_SECS:-30}"
   MMDC_TIMEOUT=
   if command -v timeout >/dev/null 2>&1; then
@@ -197,8 +223,8 @@ if command -v mmdc >/dev/null 2>&1; then
   for f in "$MERMAID_TMP"/block*.mmd; do
     [ -e "$f" ] || continue
     rc=0
-    # shellcheck disable=SC2086  # MMDC_TIMEOUT is an intentional word-split prefix
-    $MMDC_TIMEOUT mmdc -i "$f" -o "$f.svg" >/dev/null 2>"$f.err" || rc=$?
+    # shellcheck disable=SC2086  # MMDC_TIMEOUT and MMDC_CMD are intentional word-split prefixes
+    $MMDC_TIMEOUT $MMDC_CMD -i "$f" -o "$f.svg" >/dev/null 2>"$f.err" || rc=$?
     [ "$rc" -eq 0 ] && continue
     line1=$(head -n 1 "$f.err" 2>/dev/null)
     if [ "$rc" -ne 124 ] && grep -qiE "$PARSE_SIG" "$f.err" 2>/dev/null; then

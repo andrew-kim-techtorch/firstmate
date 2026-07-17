@@ -28,6 +28,11 @@
 #   (s11) mmdc infra/launch failure downgrades to an advisory warning and passes
 #   (s12) mmdc hangs and the timeout guard (exit 124) downgrades to a warning and passes
 #   (s13) FM_MMDC_TIMEOUT_SECS configures the guard duration passed to timeout/gtimeout
+#   (s14) a reserved mermaid keyword ("graph") used as a node id fails, naming it
+#   (s15) the "msgraph" rename of (s14) passes (no false positive on the substring)
+#   (s16) "flowchart LR" and "graph TD" diagram-type header lines are not flagged
+#   (s17) "subgraph id[Title]" block openers are not flagged
+#   (s18) no mmdc on PATH but npx is: the npx fallback is invoked to parse the block
 #   Canonical passes:
 #   (a) full canonical body passes (no --ui)
 #   (l) --ui canonical body with github.com/<owner>/<repo>/raw/<sha>/<path> URLs passes
@@ -101,10 +106,15 @@ SH
   printf '%s\n' "$case_dir"
 }
 
+# Runs the check against a hermetic PATH: only the case's fakebin plus the
+# standard system dirs, never the host's PATH. So a real global mmdc or npx on
+# the dev machine can never be resolved - Layer 2 runs a tool only when a test
+# explicitly stubs it in fakebin, otherwise it skips cleanly. Keeps the suite
+# deterministic and offline instead of shelling out to real `npx --yes`.
 run_check() {
   local case_dir=$1 body=$2
   shift 2
-  FM_TEST_PR_BODY="$body" PATH="$case_dir/fakebin:$PATH" "$CHECK" "$@"
+  FM_TEST_PR_BODY="$body" PATH="$case_dir/fakebin:/usr/bin:/bin" "$CHECK" "$@"
 }
 
 # --- rendering / path checks -------------------------------------------------
@@ -449,6 +459,144 @@ Follow-on to #1.'
   pass "fm-pr-body-check: literal backslash-n in mermaid label fails"
 }
 
+# (s14) A reserved mermaid keyword ("graph") used as a node id fails, naming it.
+test_mermaid_reserved_keyword_node_id_fails() {
+  local case_dir err rc
+  case_dir=$(make_case mermaid-reserved-keyword)
+  local body='**Requirement:** Do the thing.
+
+## What changed
+Did it.
+
+```mermaid
+flowchart LR
+  graph[Something] --> other[Other]
+```
+
+## How it works
+Given x, the result is y.
+
+## Evidence
+| Suite | What it guards | Result | Command |
+|-------|----------------|--------|---------|
+| t.sh | it works | pass | bash t.sh |
+
+## Risks
+None.
+
+## Links
+Follow-on to #1.'
+  err=$(run_check "$case_dir" "$body" "$VALID_URL" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "reserved keyword node id should fail but passed"
+  assert_contains "$err" "reserved mermaid keyword" "should name the reserved-keyword problem"
+  assert_contains "$err" "graph" "should name the offending keyword"
+  pass "fm-pr-body-check: reserved mermaid keyword node id fails"
+}
+
+# (s15) The "msgraph" rename of (s14) passes - not a substring false positive.
+test_mermaid_renamed_keyword_node_id_passes() {
+  local case_dir rc
+  case_dir=$(make_case mermaid-renamed-keyword)
+  local body='**Requirement:** Do the thing.
+
+## What changed
+Did it.
+
+```mermaid
+flowchart LR
+  msgraph[Something] --> other[Other]
+```
+
+## How it works
+Given x, the result is y.
+
+## Evidence
+| Suite | What it guards | Result | Command |
+|-------|----------------|--------|---------|
+| t.sh | it works | pass | bash t.sh |
+
+## Risks
+None.
+
+## Links
+Follow-on to #1.'
+  run_check "$case_dir" "$body" "$VALID_URL" >/dev/null 2>&1; rc=$?
+  expect_code 0 "$rc" "msgraph rename should pass"
+  pass "fm-pr-body-check: msgraph rename of a reserved keyword passes"
+}
+
+# (s16) Diagram-type header lines ("flowchart LR", "graph TD") are never
+# flagged as a reserved-keyword node id.
+test_mermaid_header_lines_no_false_positive() {
+  local case_dir rc
+  case_dir=$(make_case mermaid-header-lines)
+  local body='**Requirement:** Do the thing.
+
+## What changed
+Did it.
+
+```mermaid
+graph TD
+  a --> b
+```
+
+```mermaid
+flowchart LR
+  c --> d
+```
+
+## How it works
+Given x, the result is y.
+
+## Evidence
+| Suite | What it guards | Result | Command |
+|-------|----------------|--------|---------|
+| t.sh | it works | pass | bash t.sh |
+
+## Risks
+None.
+
+## Links
+Follow-on to #1.'
+  run_check "$case_dir" "$body" "$VALID_URL" >/dev/null 2>&1; rc=$?
+  expect_code 0 "$rc" "graph TD / flowchart LR header lines should not be flagged"
+  pass "fm-pr-body-check: diagram-type header lines are not a false positive"
+}
+
+# (s17) "subgraph id[Title]" block openers are not flagged.
+test_mermaid_subgraph_opener_no_false_positive() {
+  local case_dir rc
+  case_dir=$(make_case mermaid-subgraph-opener)
+  local body='**Requirement:** Do the thing.
+
+## What changed
+Did it.
+
+```mermaid
+flowchart LR
+  subgraph sec1[Section One]
+    a --> b
+  end
+```
+
+## How it works
+Given x, the result is y.
+
+## Evidence
+| Suite | What it guards | Result | Command |
+|-------|----------------|--------|---------|
+| t.sh | it works | pass | bash t.sh |
+
+## Risks
+None.
+
+## Links
+Follow-on to #1.'
+  run_check "$case_dir" "$body" "$VALID_URL" >/dev/null 2>&1; rc=$?
+  expect_code 0 "$rc" "subgraph id[Title] opener should not be flagged"
+  pass "fm-pr-body-check: subgraph id[Title] opener is not a false positive"
+}
+
 # (o) The canonical reference body's cylinder-shape, fully-quoted diagram
 # (the one bin/fm-brief.sh emits) must not be a false positive.
 test_cylinder_shape_no_false_positive() {
@@ -482,6 +630,40 @@ Follow-on to #1.'
   run_check "$case_dir" "$body" "$VALID_URL" >/dev/null 2>&1; rc=$?
   expect_code 0 "$rc" "cylinder-shape, fully-quoted diagram should pass"
   pass "fm-pr-body-check: cylinder-shape quoted diagram is not a false positive"
+}
+
+# (s19) A keyword inside a fully-quoted label, adjacent to a bracket/paren, is
+# not flagged - the keyword check strips quoted spans, matching the sibling
+# special-char linters' quote-awareness.
+test_mermaid_quoted_keyword_label_no_false_positive() {
+  local case_dir rc
+  case_dir=$(make_case mermaid-quoted-keyword)
+  local body='**Requirement:** Do the thing.
+
+## What changed
+Did it.
+
+```mermaid
+flowchart LR
+  a["graph[TD] header diagram"] --> b["flowchart(v2) output"]
+```
+
+## How it works
+Given x, the result is y.
+
+## Evidence
+| Suite | What it guards | Result | Command |
+|-------|----------------|--------|---------|
+| t.sh | it works | pass | bash t.sh |
+
+## Risks
+None.
+
+## Links
+Follow-on to #1.'
+  run_check "$case_dir" "$body" "$VALID_URL" >/dev/null 2>&1; rc=$?
+  expect_code 0 "$rc" "keyword inside a quoted label should not be flagged"
+  pass "fm-pr-body-check: keyword in a quoted label is not a false positive"
 }
 
 # (s10) mmdc present on PATH and erroring on the block fails the check.
@@ -584,6 +766,26 @@ SH
   pass "fm-pr-body-check: FM_MMDC_TIMEOUT_SECS configures the guard duration"
 }
 
+# (s18) No mmdc on PATH but npx is: the npx fallback runs the real parser, so
+# the authoritative gate still fires without a global mmdc install.
+test_npx_fallback_invoked_when_no_mmdc() {
+  local case_dir fakebin out rc
+  case_dir=$(make_case npx-fallback)
+  fakebin="$case_dir/fakebin"
+  cat > "$fakebin/npx" <<SH
+#!/usr/bin/env bash
+echo "\$*" >> "$case_dir/npx_args_seen"
+echo "Parse error on line 2" >&2
+exit 1
+SH
+  chmod +x "$fakebin/npx"
+  out=$(run_check "$case_dir" "$(canonical_body)" "$VALID_URL" 2>&1); rc=$?
+  [ "$rc" -ne 0 ] || fail "npx fallback parse failure should fail the check but passed"
+  assert_contains "$out" "mmdc" "should name the mmdc gate even when run via npx"
+  assert_contains "$(cat "$case_dir/npx_args_seen")" "--yes @mermaid-js/mermaid-cli" "npx should be invoked with the mermaid-cli package"
+  pass "fm-pr-body-check: npx fallback is invoked and enforced when mmdc is absent"
+}
+
 # --- canonical passes -------------------------------------------------------
 
 # (a) Full canonical body passes (no --ui).
@@ -666,12 +868,18 @@ test_no_table_fails
 test_ui_no_before_after_table_fails
 test_mermaid_unquoted_paren_edge_label_fails
 test_mermaid_literal_newline_fails
+test_mermaid_reserved_keyword_node_id_fails
+test_mermaid_renamed_keyword_node_id_passes
+test_mermaid_header_lines_no_false_positive
+test_mermaid_subgraph_opener_no_false_positive
 test_cylinder_shape_no_false_positive
+test_mermaid_quoted_keyword_label_no_false_positive
 test_mmdc_parse_failure_fails
 test_mmdc_parse_success_passes
 test_mmdc_infra_failure_downgrades_to_warning_and_passes
 test_mmdc_timeout_downgrades_to_warning_and_passes
 test_mmdc_configurable_timeout_is_honored
+test_npx_fallback_invoked_when_no_mmdc
 test_canonical_body_passes
 test_ui_raw_sha_url_passes
 test_ui_user_attachments_passes
