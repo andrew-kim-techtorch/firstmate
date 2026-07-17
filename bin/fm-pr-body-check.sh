@@ -174,23 +174,36 @@ fi
 # without it - this is a bonus gate, not a hard dependency.
 # A non-zero mmdc exit is only trusted as a real defect when its stderr carries
 # a recognized mermaid parse-error signature. An installed-but-broken mmdc
-# (headless Chromium/puppeteer cannot launch, ENOENT, etc.) or any unrecognized
-# output is downgraded to an advisory warning and PASSES, so a misconfigured
-# mmdc can never block this non-skippable PR-relay gate. Layer 1 stays the
-# always-on hard gate.
+# (headless Chromium/puppeteer cannot launch, ENOENT, etc.), a hang that times
+# out, or any unrecognized output is downgraded to an advisory warning and
+# PASSES, so a misconfigured mmdc can never block this non-skippable PR-relay
+# gate. Layer 1 stays the always-on hard gate.
 if command -v mmdc >/dev/null 2>&1; then
   MMDC_PARSE_ERR=
   MMDC_INFRA_ERR=
   PARSE_SIG='Parse error|Expecting|Syntax error|Lexical error|UnknownDiagramError|No diagram type detected'
+  # mmdc launches headless Chromium and can hang rather than exit; guard it with
+  # a timeout when one is on PATH (macOS lacks `timeout` by default, but coreutils
+  # ships `gtimeout`). A timeout (exit 124) is treated as an infra failure and
+  # downgraded, never a hard fail, so a wedged Chromium can never stall the gate.
+  MMDC_TIMEOUT=
+  if command -v timeout >/dev/null 2>&1; then
+    MMDC_TIMEOUT="timeout 60"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    MMDC_TIMEOUT="gtimeout 60"
+  fi
   for f in "$MERMAID_TMP"/block*.mmd; do
     [ -e "$f" ] || continue
-    if ! mmdc -i "$f" -o "$f.svg" >/dev/null 2>"$f.err"; then
-      line1=$(head -n 1 "$f.err" 2>/dev/null)
-      if grep -qiE "$PARSE_SIG" "$f.err" 2>/dev/null; then
-        MMDC_PARSE_ERR="${MMDC_PARSE_ERR:+$MMDC_PARSE_ERR$(printf '\n')}$(basename "$f"): $line1"
-      else
-        MMDC_INFRA_ERR="${MMDC_INFRA_ERR:+$MMDC_INFRA_ERR$(printf '\n')}$(basename "$f"): $line1"
-      fi
+    rc=0
+    # shellcheck disable=SC2086  # MMDC_TIMEOUT is an intentional word-split prefix
+    $MMDC_TIMEOUT mmdc -i "$f" -o "$f.svg" >/dev/null 2>"$f.err" || rc=$?
+    [ "$rc" -eq 0 ] && continue
+    line1=$(head -n 1 "$f.err" 2>/dev/null)
+    if [ "$rc" -ne 124 ] && grep -qiE "$PARSE_SIG" "$f.err" 2>/dev/null; then
+      MMDC_PARSE_ERR="${MMDC_PARSE_ERR:+$MMDC_PARSE_ERR$(printf '\n')}$(basename "$f"): $line1"
+    else
+      [ "$rc" -eq 124 ] && line1="timed out (mmdc hung; likely a broken headless Chromium)"
+      MMDC_INFRA_ERR="${MMDC_INFRA_ERR:+$MMDC_INFRA_ERR$(printf '\n')}$(basename "$f"): $line1"
     fi
   done
   if [ -n "$MMDC_PARSE_ERR" ]; then

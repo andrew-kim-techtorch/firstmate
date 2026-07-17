@@ -25,6 +25,8 @@
 #   (s8) an unquoted "(NEW)" in a mermaid edge label fails, naming the line
 #   (s9) a literal \n in a mermaid label fails, naming the line
 #   (s10) mmdc present on PATH and it errors on the block fails the check
+#   (s11) mmdc infra/launch failure downgrades to an advisory warning and passes
+#   (s12) mmdc hangs and the timeout guard (exit 124) downgrades to a warning and passes
 #   Canonical passes:
 #   (a) full canonical body passes (no --ui)
 #   (l) --ui canonical body with github.com/<owner>/<repo>/raw/<sha>/<path> URLs passes
@@ -532,6 +534,30 @@ SH
   pass "fm-pr-body-check: mmdc infra failure downgrades to warning and passes"
 }
 
+# (s12) mmdc hangs and the timeout guard kills it (exit 124) - must downgrade to
+# an advisory warning and PASS, so a wedged headless Chromium can never stall the
+# non-skippable PR-relay gate.
+test_mmdc_timeout_downgrades_to_warning_and_passes() {
+  local case_dir fakebin out rc
+  case_dir=$(make_case mmdc-timeout)
+  fakebin="$case_dir/fakebin"
+  cat > "$fakebin/mmdc" <<'SH'
+#!/usr/bin/env bash
+sleep 600
+SH
+  chmod +x "$fakebin/mmdc"
+  # Fake timeout that emulates a kill: ignore the duration arg, exit 124.
+  cat > "$fakebin/timeout" <<'SH'
+#!/usr/bin/env bash
+exit 124
+SH
+  chmod +x "$fakebin/timeout"
+  out=$(run_check "$case_dir" "$(canonical_body)" "$VALID_URL" 2>&1); rc=$?
+  expect_code 0 "$rc" "mmdc timeout should not block a valid diagram"
+  assert_contains "$out" "warning" "timeout should emit an advisory warning"
+  pass "fm-pr-body-check: mmdc timeout downgrades to warning and passes"
+}
+
 # --- canonical passes -------------------------------------------------------
 
 # (a) Full canonical body passes (no --ui).
@@ -618,6 +644,7 @@ test_cylinder_shape_no_false_positive
 test_mmdc_parse_failure_fails
 test_mmdc_parse_success_passes
 test_mmdc_infra_failure_downgrades_to_warning_and_passes
+test_mmdc_timeout_downgrades_to_warning_and_passes
 test_canonical_body_passes
 test_ui_raw_sha_url_passes
 test_ui_user_attachments_passes
