@@ -180,6 +180,9 @@ Otherwise it prints one line per problem or capability fact; handle each:
 - `NUDGE_SECONDMATES: <window-targets...>` - the secondmate sweep fast-forwarded one or more *running* secondmate homes to firstmate's current version and their instruction surface (`AGENTS.md`, `bin/`, or `.agents/skills/`) actually changed; for each listed window, send a one-line re-read nudge with `bin/fm-send.sh <window-target> 'firstmate was updated to the latest - please re-read your AGENTS.md to pick up the new instructions.'` so that secondmate picks up its new instructions.
   This mirrors `/updatefirstmate`'s `nudge-secondmates:` report: it is a gentle steer, never an interruption, and the fast-forward already landed safely.
   A secondmate that was skipped, already current, or whose advance changed no instructions is not listed and must not be disturbed.
+- `GATE_HOOK: <project>: patched pwd -> /bin/pwd -P at <hook-path>` - a project's no-mistakes post-receive gate hook had regressed to the buggy bare `$(pwd)` gate-path pattern (an upstream bug that `no-mistakes init` and version upgrades regenerate) and this locked session self-healed it; no action needed, reported only so the repair is visible.
+  `GATE_HOOK: <project>: needs repair (pwd -> /bin/pwd -P) at <hook-path>` is the read-only form, printed when this session does not hold the fleet lock so it only reports; re-run bootstrap under the lock, or run `bin/fm-gate-hook-check.sh`, to repair it.
+  `GATE_HOOK: <project>: patch failed at <hook-path>` means the repair write failed (permissions, missing hook); inspect the hook path and repair it by hand (`bin/fm-gate-hook-lib.sh` explains the fix and its rationale).
 - `FMX: X mode on ...` / `FMX: X mode off ...` - bootstrap confirmed or removed the local X-mode poll artifacts; follow section 14 for watcher cadence restart only when a running watcher needs the transition applied immediately.
 
 Bootstrap's fleet refresh is bounded by `FM_FLEET_SYNC_BOOTSTRAP_TIMEOUT` seconds, default 20; a timeout is reported as a `FLEET_SYNC` skip and does not block startup.
@@ -414,6 +417,7 @@ cd projects/<name> && no-mistakes init && no-mistakes doctor
 It does **not** vendor any skill into the project - the no-mistakes skill is user-level now, available to every crewmate without a per-project copy.
 So init produces nothing to commit; it is a sanctioned exception to the never-write rule (section 1) only in that it runs git remote/config setup inside the project.
 Touch nothing else.
+Immediately after init, from the firstmate home root, repair the freshly generated gate hook if it regenerated with the upstream `$(pwd)` gate-path bug (`bin/fm-gate-hook-check.sh`; the fuller self-heal explanation lives in `bin/fm-gate-hook-lib.sh`, and bootstrap runs the same check every session as a backstop).
 `direct-PR` and `local-only` projects skip init entirely - they do not run the pipeline (`local-only` has no remote at all).
 
 If `no-mistakes doctor` reports problems, fix the environment (auth, daemon) before dispatching work to that project.

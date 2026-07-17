@@ -89,6 +89,7 @@ tests/fm-grok-harness.test.sh             # grok adapter spawn hook, token guard
 tests/fm-fleet-sync.test.sh               # project clone refresh: safe detached recovery, STUCK drift reports, benign skips, single-project name resolution, and bootstrap relay
 tests/fm-x-mode.test.sh                   # X-mode poll, inbox context round-trip, reply threading, dismiss, completion follow-up counters/caps, dry-run preview, and .env-presence activation tests
 tests/fm-tangle-guard.test.sh             # primary-checkout tangle detection, read-only remediation suppression, and spawn/brief isolation tests
+tests/fm-gate-hook.test.sh                # no-mistakes gate-hook self-heal: bad bare $(pwd) detection, repair correctness/idempotence, permission-bit preservation, no-mistakes-remote resolution, and CLI --detect-only vs repair vs already-clean behavior
 tests/fm-brief.test.sh                    # fm-brief.sh bash -n parse regression guard (issue #166), clean no-mistakes/direct-PR/local-only brief generation, PR-based briefs carry the filled reference PR body (Requirement lead, mermaid schematic, Testing suite table) and the required post-pipeline gh-axi pr edit rewrite step preserving the ## Pipeline footer, and local-only briefs omit that PR-body section
 tests/fm-spawn-batch.test.sh              # batch dispatch and FM_HOME project-path scoping tests
 tests/fm-spawn-dispatch-profile.test.sh   # concrete dispatch profile flags: active-profile backstop, harness/model/effort meta, launch templates, batch forwarding, and secondmate exemption
