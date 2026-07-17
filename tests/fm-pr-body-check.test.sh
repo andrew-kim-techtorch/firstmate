@@ -106,10 +106,15 @@ SH
   printf '%s\n' "$case_dir"
 }
 
+# Runs the check against a hermetic PATH: only the case's fakebin plus the
+# standard system dirs, never the host's PATH. So a real global mmdc or npx on
+# the dev machine can never be resolved - Layer 2 runs a tool only when a test
+# explicitly stubs it in fakebin, otherwise it skips cleanly. Keeps the suite
+# deterministic and offline instead of shelling out to real `npx --yes`.
 run_check() {
   local case_dir=$1 body=$2
   shift 2
-  FM_TEST_PR_BODY="$body" PATH="$case_dir/fakebin:$PATH" "$CHECK" "$@"
+  FM_TEST_PR_BODY="$body" PATH="$case_dir/fakebin:/usr/bin:/bin" "$CHECK" "$@"
 }
 
 # --- rendering / path checks -------------------------------------------------
@@ -627,6 +632,40 @@ Follow-on to #1.'
   pass "fm-pr-body-check: cylinder-shape quoted diagram is not a false positive"
 }
 
+# (s19) A keyword inside a fully-quoted label, adjacent to a bracket/paren, is
+# not flagged - the keyword check strips quoted spans, matching the sibling
+# special-char linters' quote-awareness.
+test_mermaid_quoted_keyword_label_no_false_positive() {
+  local case_dir rc
+  case_dir=$(make_case mermaid-quoted-keyword)
+  local body='**Requirement:** Do the thing.
+
+## What changed
+Did it.
+
+```mermaid
+flowchart LR
+  a["graph[TD] header diagram"] --> b["flowchart(v2) output"]
+```
+
+## How it works
+Given x, the result is y.
+
+## Evidence
+| Suite | What it guards | Result | Command |
+|-------|----------------|--------|---------|
+| t.sh | it works | pass | bash t.sh |
+
+## Risks
+None.
+
+## Links
+Follow-on to #1.'
+  run_check "$case_dir" "$body" "$VALID_URL" >/dev/null 2>&1; rc=$?
+  expect_code 0 "$rc" "keyword inside a quoted label should not be flagged"
+  pass "fm-pr-body-check: keyword in a quoted label is not a false positive"
+}
+
 # (s10) mmdc present on PATH and erroring on the block fails the check.
 test_mmdc_parse_failure_fails() {
   local case_dir fakebin err rc
@@ -834,6 +873,7 @@ test_mermaid_renamed_keyword_node_id_passes
 test_mermaid_header_lines_no_false_positive
 test_mermaid_subgraph_opener_no_false_positive
 test_cylinder_shape_no_false_positive
+test_mermaid_quoted_keyword_label_no_false_positive
 test_mmdc_parse_failure_fails
 test_mmdc_parse_success_passes
 test_mmdc_infra_failure_downgrades_to_warning_and_passes

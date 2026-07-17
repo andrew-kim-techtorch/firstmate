@@ -161,11 +161,13 @@ MERMAID_LINT_ERR=$(printf '%s\n' "$BODY" | awk -v outdir="$MERMAID_TMP" '
       if (line ~ /\|[^|"][^|"]*[()<>&=][^|]*\|/) {
         printf("line %d: unquoted special character in an |edge label| - quote it: %s\n", ln, line)
       }
-      if (line ~ /(^|[^A-Za-z0-9_])(graph|end|subgraph|class|style|click|linkStyle|direction|flowchart|classDef)[[({]/ ||
-          line ~ /(^|[^A-Za-z0-9_])(graph|end|subgraph|class|style|click|linkStyle|direction|flowchart|classDef)[[:space:]]*(-->|---)/ ||
-          line ~ /(-->|---)[[:space:]]*(graph|end|subgraph|class|style|click|linkStyle|direction|flowchart|classDef)([^A-Za-z0-9_]|$)/) {
-        match(line, /(graph|end|subgraph|class|style|click|linkStyle|direction|flowchart|classDef)/)
-        kw = substr(line, RSTART, RLENGTH)
+      kwline = line
+      gsub(/"[^"]*"/, " ", kwline)
+      if (kwline ~ /(^|[^A-Za-z0-9_])(graph|end|subgraph|class|style|click|linkStyle|direction|flowchart|classDef)[[({]/ ||
+          kwline ~ /(^|[^A-Za-z0-9_])(graph|end|subgraph|class|style|click|linkStyle|direction|flowchart|classDef)[[:space:]]*(-->|---)/ ||
+          kwline ~ /(-->|---)[[:space:]]*(graph|end|subgraph|class|style|click|linkStyle|direction|flowchart|classDef)([^A-Za-z0-9_]|$)/) {
+        match(kwline, /(graph|end|subgraph|class|style|click|linkStyle|direction|flowchart|classDef)/)
+        kw = substr(kwline, RSTART, RLENGTH)
         printf("line %d: reserved mermaid keyword \"%s\" used as a node id: rename it (e.g. \"ms%s\"): %s\n", ln, kw, kw, line)
       }
       next
