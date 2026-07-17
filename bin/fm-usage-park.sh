@@ -60,6 +60,7 @@ parse_reset_to_epoch() {  # <reset-string>
   mm=${tok#*:}; mm=${mm%%[!0-9]*}
   case "$hh" in ''|*[!0-9]*) return 1 ;; esac
   case "$mm" in ''|*[!0-9]*) return 1 ;; esac
+  hh=$((10#$hh)); mm=$((10#$mm))
   ampm=$(printf '%s' "$tok" | grep -oiE '[ap]m' | head -1 | tr '[:upper:]' '[:lower:]')
   case "$ampm" in
     pm) [ "$hh" -lt 12 ] && hh=$((hh + 12)) ;;

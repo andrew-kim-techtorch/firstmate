@@ -106,9 +106,23 @@ test_fallback_when_no_reset_time() {
   pass "no reset time falls back to an estimated future epoch"
 }
 
+# (e) a leading-zero reset minute (08/09) must not be read as octal and rounded
+# down to :00; the parsed epoch preserves the actual minute.
+test_leading_zero_minute_preserved() {
+  local state; state=$(new_state leadzero)
+  local out; out=$(run_park "$state" crew-z "11:08pm")
+  assert_contains "$out" "parked crew-z" "leading-zero minute still parks the crew"
+  local epoch; read -r epoch < "$state/.usage-reset-epoch"
+  case "$epoch" in ''|*[!0-9]*) fail "leading-zero epoch not numeric: '$epoch'" ;; esac
+  local minute; minute=$(date -r "$epoch" +%M 2>/dev/null || date -d "@$epoch" +%M)
+  [ "$minute" = "08" ] || fail "reset minute :08 must be preserved, got :$minute"
+  pass "leading-zero reset minute is decimal, not rounded to :00"
+}
+
 test_park_writes_artifacts
 test_check_fires_once_after_reset
 test_multiple_parks_share_earliest_window
 test_fallback_when_no_reset_time
+test_leading_zero_minute_preserved
 
 echo "all fm-usage-park tests passed"
