@@ -5,7 +5,7 @@
 # own gate directory. Pushing from a linked git worktree (every crewmate ship
 # task) leaves $PWD as "." during receive-pack, so the daemon rejects the push
 # with "invalid gate path: ." and no validation run is ever created. The fix
-# is "$(pwd)" -> "$(pwd -P)" (see bin/fm-gate-hook-lib.sh). These cases pin the
+# is "$(pwd)" -> "$(/bin/pwd -P)" (see bin/fm-gate-hook-lib.sh). These cases pin the
 # lib's detect/repair primitives and the fm-gate-hook-check.sh CLI that scans
 # every project and either reports or repairs, hermetic over fixture hooks and
 # fake project/gate-repo pairs.
@@ -67,9 +67,9 @@ test_repair_rewrite_and_idempotence() {
   gate_hook_repair "$hook" || fail "first repair failed"
   content=$(cat "$hook")
   # shellcheck disable=SC2016  # single quotes are intentional: literal strings, no shell expansion
-  assert_contains "$content" '--gate "$(pwd -P)"' "repair did not patch the --gate argument"
+  assert_contains "$content" '--gate "$(/bin/pwd -P)"' "repair did not patch the --gate argument"
   # shellcheck disable=SC2016  # single quotes are intentional: literal strings, no shell expansion
-  assert_contains "$content" 'LOG="$(pwd -P)/notify-push.log"' "repair did not patch the LOG assignment"
+  assert_contains "$content" 'LOG="$(/bin/pwd -P)/notify-push.log"' "repair did not patch the LOG assignment"
   # shellcheck disable=SC2016  # single quotes are intentional: literal strings, no shell expansion
   assert_not_contains "$content" '$(pwd)' "repair left a bare \$(pwd) behind"
 
@@ -77,10 +77,41 @@ test_repair_rewrite_and_idempotence() {
   # still succeeds.
   gate_hook_repair "$hook" || fail "second repair on an already-good hook failed"
   [ "$(cat "$hook")" = "$content" ] || fail "second repair changed an already-good hook"
-  pass "gate_hook_repair: rewrites every bare \$(pwd) to \$(pwd -P) and is idempotent"
+  pass "gate_hook_repair: rewrites every bare \$(pwd) to \$(/bin/pwd -P) and is idempotent"
 
   # Executable bit and permissions survive the tmp-file-then-mv repair.
   [ -x "$hook" ] || fail "repair dropped the hook's executable bit"
+}
+
+# --- efficacy: repaired hook resolves an ABSOLUTE path under PWD="." ----------
+
+# The whole point of the repair is that the buggy hook, run during receive-pack
+# with a stale PWD=".", emits "--gate ." and is rejected. Prove the repaired
+# gate expression resolves an absolute path even when PWD="." (which the shell
+# builtin `pwd -P` does NOT under this machine's /bin/sh), while the original
+# bare $(pwd) still yields ".".
+test_repaired_gate_resolves_absolute_under_stale_pwd() {
+  local dir hook realdir bad_val good_val
+  dir="$TMP_ROOT/efficacy"
+  hook=$(write_bad_hook "$dir")
+  gate_hook_repair "$hook" || fail "repair failed"
+
+  realdir=$(cd "$dir" && /bin/pwd -P)
+
+  # The buggy form under the exact receive-pack condition: stale PWD=".".
+  # shellcheck disable=SC2016  # single quotes intentional: evaluated by the child sh, not here
+  bad_val=$(cd "$realdir" && PWD=. sh -c 'echo "$(pwd)"')
+  [ "$bad_val" = "." ] || fail "expected bare \$(pwd) to yield '.' under stale PWD, got '$bad_val'"
+
+  # The repaired form must resolve to a real absolute path despite PWD=".".
+  # shellcheck disable=SC2016  # single quotes intentional: evaluated by the child sh, not here
+  good_val=$(cd "$realdir" && PWD=. sh -c 'echo "$(/bin/pwd -P)"')
+  case "$good_val" in
+    /*) : ;;
+    *) fail "repaired gate expression did not resolve to an absolute path under stale PWD, got '$good_val'" ;;
+  esac
+  [ "$good_val" = "$realdir" ] || fail "repaired gate expression resolved to '$good_val', expected '$realdir'"
+  pass "repaired hook: gate path resolves to an absolute dir under the buggy stale PWD=\".\""
 }
 
 # --- lib: gate_repo_for_project ----------------------------------------------
@@ -127,7 +158,7 @@ test_cli_detect_only_does_not_write() {
   before=$(cat "$hook")
 
   out=$(run_check "$projects" --detect-only)
-  assert_contains "$out" "GATE_HOOK: alpha: needs repair (pwd -> pwd -P) at $hook" "detect-only did not report the bad hook"
+  assert_contains "$out" "GATE_HOOK: alpha: needs repair (pwd -> /bin/pwd -P) at $hook" "detect-only did not report the bad hook"
   after=$(cat "$hook")
   [ "$before" = "$after" ] || fail "detect-only mode modified the hook file"
   pass "fm-gate-hook-check.sh --detect-only: reports a bad hook without repairing it"
@@ -143,7 +174,7 @@ test_cli_repairs_and_then_is_silent() {
   hook=$(write_bad_hook "$gate/hooks")
 
   out=$(run_check "$projects")
-  assert_contains "$out" "GATE_HOOK: beta: patched pwd -> pwd -P at $hook" "repair mode did not report the patch"
+  assert_contains "$out" "GATE_HOOK: beta: patched pwd -> /bin/pwd -P at $hook" "repair mode did not report the patch"
   # shellcheck disable=SC2016  # single quotes are intentional: literal string, no shell expansion
   assert_not_contains "$(cat "$hook")" '$(pwd)' "repair mode left a bare \$(pwd) behind"
 
@@ -172,6 +203,7 @@ test_cli_ignores_healthy_projects() {
 
 test_is_bad_detection
 test_repair_rewrite_and_idempotence
+test_repaired_gate_resolves_absolute_under_stale_pwd
 test_gate_repo_for_project
 test_cli_detect_only_does_not_write
 test_cli_repairs_and_then_is_silent

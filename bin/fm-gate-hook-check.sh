@@ -9,8 +9,8 @@
 #                  $FM_PROJECTS_OVERRIDE or $FM_HOME/projects, matching
 #                  fm-bootstrap.sh).
 # Prints, per project with a bad hook, exactly one of:
-#   "GATE_HOOK: <label>: needs repair (pwd -> pwd -P) at <hook-path>"
-#   "GATE_HOOK: <label>: patched pwd -> pwd -P at <hook-path>"
+#   "GATE_HOOK: <label>: needs repair (pwd -> /bin/pwd -P) at <hook-path>"
+#   "GATE_HOOK: <label>: patched pwd -> /bin/pwd -P at <hook-path>"
 #   "GATE_HOOK: <label>: patch failed at <hook-path>"
 # Silent when no bad hooks are found. Always exits 0 so it never blocks
 # bootstrap or the project-init flow.
@@ -39,9 +39,9 @@ for proj in "$PROJECTS"/*; do
   hook="$gate/hooks/post-receive"
   gate_hook_is_bad "$hook" || continue
   if [ "$detect_only" -eq 1 ]; then
-    echo "GATE_HOOK: $label: needs repair (pwd -> pwd -P) at $hook"
+    echo "GATE_HOOK: $label: needs repair (pwd -> /bin/pwd -P) at $hook"
   elif gate_hook_repair "$hook"; then
-    echo "GATE_HOOK: $label: patched pwd -> pwd -P at $hook"
+    echo "GATE_HOOK: $label: patched pwd -> /bin/pwd -P at $hook"
   else
     echo "GATE_HOOK: $label: patch failed at $hook"
   fi
