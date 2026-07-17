@@ -8,7 +8,11 @@
 commands:
   test: 'command -v tmux >/dev/null || { echo "tmux is required for e2e tests" >&2; exit 1; }; tmux -V; rc=0; for t in tests/*.test.sh; do echo "== $t =="; bash "$t" || rc=1; done; exit "$rc"'
 
-# Keep test evidence out of this repo; it stays in a temp dir instead.
+# Keep test evidence out of this repo; it stays in a temp dir instead. CI
+# rejects tracked .no-mistakes paths here, so flipping this to true breaks CI
+# (AGENTS.md section 7's do-not-fight note). The temp-dir path this produces in
+# generated PR bodies is handled instead by bin/fm-pr-check.sh auto-invoking
+# bin/fm-pr-body-sanitize.sh on a local-path gate failure.
 test:
   evidence:
     store_in_repo: false
