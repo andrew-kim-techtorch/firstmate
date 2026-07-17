@@ -8,6 +8,9 @@
 # one-owner of the standard and this script does not restate it. The core
 # non---ui check runs here because fm-pr-check does not know if a change is
 # UI-visible; --ui stays firstmate's explicit per-task call per AGENTS.md 7.
+# A local-filesystem-path failure (the recurring no-mistakes-evidence-step
+# case; see fm-pr-body-sanitize.sh) is auto-sanitized and the gate retried once
+# before failing; every other substance failure still fails immediately.
 # The body gate is the relay path's; fm-pr-merge.sh's merge-recording call sets
 # FM_PR_CHECK_SKIP_BODY_GATE=1 because a captain-approved or yolo merge already
 # cleared the relay gate, and re-checking at merge time would block on a
@@ -25,10 +28,29 @@ URL=$2
 
 # Relay-path body gate: fail loudly before recording pr= or arming the poll.
 # fm-pr-body-check.sh prints its own one-line reason to stderr and exits non-zero.
+# A failure naming a local filesystem path is self-healing: the no-mistakes
+# pipeline's own evidence step is the recurring source of those paths (see
+# bin/fm-pr-body-sanitize.sh's header), so run the sanitizer once and retry the
+# gate instead of forcing a manual rewrite for this one known-recoverable case.
+# Any other substance failure (missing sections, bare body, bad mermaid, ...)
+# still fails immediately, unchanged.
 if [ "${FM_PR_CHECK_SKIP_BODY_GATE:-0}" != 1 ]; then
-  if ! "$FM_ROOT/bin/fm-pr-body-check.sh" "$URL"; then
-    echo "fm-pr-check: PR body failed the canonical substance gate (above); rewrite it before relaying $URL" >&2
-    exit 1
+  if ! BODY_CHECK_ERR=$("$FM_ROOT/bin/fm-pr-body-check.sh" "$URL" 2>&1); then
+    printf '%s\n' "$BODY_CHECK_ERR" >&2
+    if printf '%s' "$BODY_CHECK_ERR" | grep -q 'local filesystem path'; then
+      echo "fm-pr-check: PR body has local evidence paths; auto-sanitizing and retrying" >&2
+      if ! "$FM_ROOT/bin/fm-pr-body-sanitize.sh" "$URL" >&2; then
+        echo "fm-pr-check: auto-sanitize failed; rewrite the PR body before relaying $URL" >&2
+        exit 1
+      fi
+      if ! "$FM_ROOT/bin/fm-pr-body-check.sh" "$URL"; then
+        echo "fm-pr-check: PR body still fails the canonical substance gate after auto-sanitize (above); rewrite it before relaying $URL" >&2
+        exit 1
+      fi
+    else
+      echo "fm-pr-check: PR body failed the canonical substance gate (above); rewrite it before relaying $URL" >&2
+      exit 1
+    fi
   fi
 fi
 
