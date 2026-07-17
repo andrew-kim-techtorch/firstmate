@@ -27,6 +27,7 @@
 #   (s10) mmdc present on PATH and it errors on the block fails the check
 #   (s11) mmdc infra/launch failure downgrades to an advisory warning and passes
 #   (s12) mmdc hangs and the timeout guard (exit 124) downgrades to a warning and passes
+#   (s13) FM_MMDC_TIMEOUT_SECS configures the guard duration passed to timeout/gtimeout
 #   Canonical passes:
 #   (a) full canonical body passes (no --ui)
 #   (l) --ui canonical body with github.com/<owner>/<repo>/raw/<sha>/<path> URLs passes
@@ -558,6 +559,31 @@ SH
   pass "fm-pr-body-check: mmdc timeout downgrades to warning and passes"
 }
 
+# (s13) FM_MMDC_TIMEOUT_SECS configures the duration passed to timeout/gtimeout,
+# so a slower CI sandbox (or a faster fail) can override the 30s default.
+test_mmdc_configurable_timeout_is_honored() {
+  local case_dir fakebin rc seen
+  case_dir=$(make_case mmdc-configurable-timeout)
+  fakebin="$case_dir/fakebin"
+  cat > "$fakebin/mmdc" <<'SH'
+#!/usr/bin/env bash
+sleep 600
+SH
+  chmod +x "$fakebin/mmdc"
+  # Fake timeout that records the duration it was invoked with, then emulates a kill.
+  cat > "$fakebin/timeout" <<SH
+#!/usr/bin/env bash
+echo "\$1" > "$case_dir/timeout_arg_seen"
+exit 124
+SH
+  chmod +x "$fakebin/timeout"
+  FM_MMDC_TIMEOUT_SECS=5 run_check "$case_dir" "$(canonical_body)" "$VALID_URL" >/dev/null 2>&1; rc=$?
+  expect_code 0 "$rc" "custom timeout should still downgrade to warning and pass"
+  seen=$(cat "$case_dir/timeout_arg_seen" 2>/dev/null)
+  [ "$seen" = "5" ] || fail "expected timeout to be invoked with duration 5, got: $seen"
+  pass "fm-pr-body-check: FM_MMDC_TIMEOUT_SECS configures the guard duration"
+}
+
 # --- canonical passes -------------------------------------------------------
 
 # (a) Full canonical body passes (no --ui).
@@ -645,6 +671,7 @@ test_mmdc_parse_failure_fails
 test_mmdc_parse_success_passes
 test_mmdc_infra_failure_downgrades_to_warning_and_passes
 test_mmdc_timeout_downgrades_to_warning_and_passes
+test_mmdc_configurable_timeout_is_honored
 test_canonical_body_passes
 test_ui_raw_sha_url_passes
 test_ui_user_attachments_passes
