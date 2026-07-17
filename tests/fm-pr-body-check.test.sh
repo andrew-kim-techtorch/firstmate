@@ -513,6 +513,25 @@ SH
   pass "fm-pr-body-check: mmdc parse success passes"
 }
 
+# (s11) mmdc present but broken (infra/launch failure, not a parse error) must
+# downgrade to an advisory warning and PASS, so a misconfigured mmdc can never
+# block the non-skippable PR-relay gate.
+test_mmdc_infra_failure_downgrades_to_warning_and_passes() {
+  local case_dir fakebin out rc
+  case_dir=$(make_case mmdc-infra-failure)
+  fakebin="$case_dir/fakebin"
+  cat > "$fakebin/mmdc" <<'SH'
+#!/usr/bin/env bash
+echo "Failed to launch the browser process! Could not find Chromium" >&2
+exit 1
+SH
+  chmod +x "$fakebin/mmdc"
+  out=$(run_check "$case_dir" "$(canonical_body)" "$VALID_URL" 2>&1); rc=$?
+  expect_code 0 "$rc" "mmdc infra failure should not block a valid diagram"
+  assert_contains "$out" "warning" "infra failure should emit an advisory warning"
+  pass "fm-pr-body-check: mmdc infra failure downgrades to warning and passes"
+}
+
 # --- canonical passes -------------------------------------------------------
 
 # (a) Full canonical body passes (no --ui).
@@ -598,6 +617,7 @@ test_mermaid_literal_newline_fails
 test_cylinder_shape_no_false_positive
 test_mmdc_parse_failure_fails
 test_mmdc_parse_success_passes
+test_mmdc_infra_failure_downgrades_to_warning_and_passes
 test_canonical_body_passes
 test_ui_raw_sha_url_passes
 test_ui_user_attachments_passes

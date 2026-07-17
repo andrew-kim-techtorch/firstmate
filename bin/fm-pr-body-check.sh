@@ -172,17 +172,33 @@ fi
 # Layer 2 (optional, authoritative): actually parse each block when a mermaid
 # CLI is on PATH. Skips cleanly when mmdc is absent so the check still works
 # without it - this is a bonus gate, not a hard dependency.
+# A non-zero mmdc exit is only trusted as a real defect when its stderr carries
+# a recognized mermaid parse-error signature. An installed-but-broken mmdc
+# (headless Chromium/puppeteer cannot launch, ENOENT, etc.) or any unrecognized
+# output is downgraded to an advisory warning and PASSES, so a misconfigured
+# mmdc can never block this non-skippable PR-relay gate. Layer 1 stays the
+# always-on hard gate.
 if command -v mmdc >/dev/null 2>&1; then
-  MMDC_ERR=
+  MMDC_PARSE_ERR=
+  MMDC_INFRA_ERR=
+  PARSE_SIG='Parse error|Expecting|Syntax error|Lexical error|UnknownDiagramError|No diagram type detected'
   for f in "$MERMAID_TMP"/block*.mmd; do
     [ -e "$f" ] || continue
     if ! mmdc -i "$f" -o "$f.svg" >/dev/null 2>"$f.err"; then
-      MMDC_ERR="${MMDC_ERR:+$MMDC_ERR$(printf '\n')}$(basename "$f"): $(head -n 1 "$f.err" 2>/dev/null)"
+      line1=$(head -n 1 "$f.err" 2>/dev/null)
+      if grep -qiE "$PARSE_SIG" "$f.err" 2>/dev/null; then
+        MMDC_PARSE_ERR="${MMDC_PARSE_ERR:+$MMDC_PARSE_ERR$(printf '\n')}$(basename "$f"): $line1"
+      else
+        MMDC_INFRA_ERR="${MMDC_INFRA_ERR:+$MMDC_INFRA_ERR$(printf '\n')}$(basename "$f"): $line1"
+      fi
     fi
   done
-  if [ -n "$MMDC_ERR" ]; then
-    printf 'error: mermaid diagram failed to parse (mmdc):\n%s\n' "$MMDC_ERR" >&2
+  if [ -n "$MMDC_PARSE_ERR" ]; then
+    printf 'error: mermaid diagram failed to parse (mmdc):\n%s\n' "$MMDC_PARSE_ERR" >&2
     exit 1
+  fi
+  if [ -n "$MMDC_INFRA_ERR" ]; then
+    printf 'warning: mmdc could not verify a mermaid diagram (not a parse error; likely a broken mmdc install - skipping the optional mmdc gate):\n%s\n' "$MMDC_INFRA_ERR" >&2
   fi
 fi
 
