@@ -421,6 +421,9 @@ Immediately after init, from the firstmate home root, repair the freshly generat
 `direct-PR` and `local-only` projects skip init entirely - they do not run the pipeline (`local-only` has no remote at all).
 
 If `no-mistakes doctor` reports problems, fix the environment (auth, daemon) before dispatching work to that project.
+Also check for a bounded, self-contained test entry point: an npm/yarn/pnpm `test` script, or an equivalent (`go test ./...`, `pytest`, `cargo test`).
+Without one, no-mistakes' test step falls back to a slow, agent-driven test runner that can flail for tens of minutes and get OOM-killed; this repo's own `.no-mistakes.yaml` `commands.test` override is a worked example of pointing no-mistakes straight at a bounded command instead.
+Firstmate does not write to projects (section 1), so a missing test entry point is not fixed here: note it, and the ship-brief contract (section 11) has the first ship task add it.
 
 ## 7. Task lifecycle
 
@@ -838,7 +841,7 @@ Correct or delete stale free-form notes the moment you catch them, and put durab
 Scaffold with `bin/fm-brief.sh <id> <repo-name>` - it writes `data/<id>/brief.md` with the standard contract (branch setup, status-reporting protocol, push/merge rules, definition of done) and all paths filled in.
 The ship-brief Setup opens with a worktree-isolation assertion ahead of the branch step: the crewmate confirms it is in its own disposable task worktree, not the primary checkout, and stops with `blocked: launched in primary checkout, not an isolated worktree` if not - the upstream half of the worktree-tangle guard (section 8).
 For a ship task the definition of done is shaped by the project's delivery mode (section 6): `no-mistakes` stops after the implementation commit, then firstmate triggers the harness-appropriate no-mistakes validation pipeline; `direct-PR` has the crewmate push and open the PR itself, and `local-only` has it stop at "ready in branch" for firstmate to review and merge locally.
-The no-mistakes brief points to no-mistakes' version-matched guidance and keeps only firstmate-specific wrapper rules for `ask-user` escalation, `--yes` avoidance, and the CI-green done line.
+The no-mistakes brief points to no-mistakes' version-matched guidance and keeps only firstmate-specific wrapper rules for `ask-user` escalation, `--yes` avoidance, the CI-green done line, and, per section 6, an explicit expectation that a fast bounded test command exists (or is added) before reporting done, so the pipeline's test step never needs the slow agent fallback.
 The scaffold reads the mode via `fm-project-mode.sh`, so you do not pass it.
 Ship briefs also include the project-memory contract: run `bin/fm-ensure-agents-md.sh` when the project already has agent-memory files or when the task produced durable project-intrinsic knowledge, then record proportionate learnings in `AGENTS.md`.
 PR-based ship briefs (`no-mistakes` and `direct-PR`, not `local-only`) also carry the canonical PR body standard the crewmate follows and `bin/fm-pr-body-check.sh` enforces on substance (a bare or no-mistakes-pipeline-default body fails): a filled reference body plus the required post-pipeline step to rewrite the pipeline's default body to the canonical template via `gh-axi pr edit`, preserving the auto-appended `## Pipeline` footer.

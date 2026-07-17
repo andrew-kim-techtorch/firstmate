@@ -207,6 +207,9 @@ EOF
     DOD=$(cat <<EOF
 # Definition of done
 The task is complete only when committed on your branch.
+Before reporting done, make sure this project has a fast, bounded, self-contained test command: an npm/yarn/pnpm \`test\` script, or an equivalent (\`go test ./...\`, \`pytest\`, \`cargo test\`).
+Without one, no-mistakes' test step falls back to a slow, agent-driven test runner instead of running your change's tests directly.
+If the project lacks one, add it as part of this change (or point no-mistakes at a bounded command via a \`commands.test\` override in the project's own \`.no-mistakes.yaml\`, mirroring firstmate's own).
 When you believe it is complete, append \`done: {summary}\` to the status file and stop.
 Firstmate will then instruct you to run /no-mistakes to validate and ship a PR.
 
