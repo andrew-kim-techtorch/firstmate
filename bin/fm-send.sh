@@ -104,7 +104,15 @@ else
   sleep_s=${FM_SEND_SLEEP:-0.4}
   # Type once, submit, verify. Lenient: only a positively-confirmed swallow
   # (text still in the composer) is an error; an unreadable pane is assumed sent.
-  verdict=$(fm_backend_send_text_submit "$TARGET_BACKEND" "$T" "$MARK_PREFIX$*" "$retries" "$sleep_s" "$settle" "$EXPECTED_LABEL")
+  # Codex accepts a steer during an active tool call into its visible follow-up
+  # queue while leaving the queued row at the cursor. The tmux verifier would
+  # otherwise call that row pending and retry Enter. Scope queue recognition to
+  # a meta-confirmed Codex target; other harnesses keep the existing contract.
+  if [ "$TARGET_HARNESS" = codex ]; then
+    verdict=$(FM_TMUX_CODEX_QUEUE_VERIFY=1 fm_backend_send_text_submit "$TARGET_BACKEND" "$T" "$MARK_PREFIX$*" "$retries" "$sleep_s" "$settle" "$EXPECTED_LABEL")
+  else
+    verdict=$(fm_backend_send_text_submit "$TARGET_BACKEND" "$T" "$MARK_PREFIX$*" "$retries" "$sleep_s" "$settle" "$EXPECTED_LABEL")
+  fi
   case "$verdict" in
     pending)
       echo "error: text not submitted to $T (Enter swallowed; text left in composer)" >&2

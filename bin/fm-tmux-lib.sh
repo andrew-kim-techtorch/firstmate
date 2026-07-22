@@ -164,30 +164,61 @@ fm_pane_is_busy() {  # <target>
     | grep -qiE "${FM_BUSY_REGEX:-$FM_TMUX_BUSY_REGEX_DEFAULT}"
 }
 
+# fm_tmux_codex_queue_count: count the visible Codex follow-up rows under its
+# "Messages to be submitted after next tool call" heading. The heading and the
+# leading arrow on each queued row are Codex TUI-owned acknowledgement signals.
+# A capture failure is inconclusive and prints nothing.
+fm_tmux_codex_queue_count() {  # <target> -> non-negative integer or empty
+  local target=$1 pane
+  pane=$(tmux capture-pane -p -J -t "$target" -S -80 2>/dev/null) || return 0
+  printf '%s\n' "$pane" | awk '
+    /Messages to be submitted after next tool call/ { in_queue = 1; count = 0; next }
+    in_queue && index($0, "↳") { count++ }
+    END { print count + 0 }
+  '
+}
+
 # fm_tmux_submit_core: type <text> into <target> ONCE, then submit with Enter,
-# verifying the composer cleared. Retries Enter ONLY — never retypes, because a
+# verifying the composer cleared or an enabled Codex follow-up queue grew.
+# Retries Enter ONLY - never retypes, because a
 # swallowed Enter leaves our text in the composer and retyping would duplicate
 # it. Echoes the final verdict on stdout (empty|pending|unknown|send-failed) so callers can
 # pick their own success policy:
 #   - the daemon clears its buffer only on "empty" (strict: an unknown pane must
 #     not be mistaken for a delivered escalation).
 #   - fm-send fails only on "pending" (lenient: a positively-confirmed swallow),
-#     so an unreadable pane never turns a normal steer into a false error.
-fm_tmux_submit_enter_core() {  # <target> <retries> <enter-sleep>
-  local target=$1 retries=$2 sleep_s=$3 i=0 state
+#     accepts "queued" for a meta-confirmed Codex target, and treats an unreadable
+#     pane as inconclusive so it never turns a normal steer into a false error.
+fm_tmux_submit_enter_core() {  # <target> <retries> <enter-sleep> [codex-queue-count-before]
+  local target=$1 retries=$2 sleep_s=$3 queue_before=${4:-} i=0 state queue_after
   while :; do
     tmux send-keys -t "$target" Enter 2>/dev/null || true
     sleep "$sleep_s"
     state=$(fm_tmux_composer_state "$target")
     [ "$state" = pending ] || { printf '%s' "$state"; return 0; }
+    if [ -n "$queue_before" ]; then
+      queue_after=$(fm_tmux_codex_queue_count "$target")
+      case "$queue_after" in
+        ''|*[!0-9]*) : ;;
+        *)
+          if [ "$queue_after" -gt "$queue_before" ]; then
+            printf 'queued'
+            return 0
+          fi
+          ;;
+      esac
+    fi
     i=$((i + 1))
     [ "$i" -lt "$retries" ] || { printf 'pending'; return 0; }
   done
 }
 
 fm_tmux_submit_core() {  # <target> <text> <retries> <enter-sleep> <settle>
-  local target=$1 text=$2 retries=$3 sleep_s=$4 settle=$5
+  local target=$1 text=$2 retries=$3 sleep_s=$4 settle=$5 queue_before=""
+  if [ "${FM_TMUX_CODEX_QUEUE_VERIFY:-}" = 1 ]; then
+    queue_before=$(fm_tmux_codex_queue_count "$target")
+  fi
   tmux send-keys -t "$target" -l "$text" 2>/dev/null || { printf 'send-failed'; return 0; }
   sleep "$settle"
-  fm_tmux_submit_enter_core "$target" "$retries" "$sleep_s"
+  fm_tmux_submit_enter_core "$target" "$retries" "$sleep_s" "$queue_before"
 }

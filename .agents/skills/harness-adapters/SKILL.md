@@ -116,6 +116,10 @@ That scope matters because, unlike `/`, a leading `$` commonly starts ordinary t
 An explicit `session:window` target has no meta, so its harness is unknown and treated as non-codex (the safe fast-path default).
 This is why the validation trigger (`$no-mistakes`) to a codex crew now lands on the first Enter instead of biting the popup.
 
+When Codex is inside a tool call, Enter can accept a steer into its visible `Messages to be submitted after next tool call` queue while leaving the queued row at the cursor.
+For a meta-confirmed Codex target, `fm-send` treats an increase in that queue's visible arrow-prefixed row count as a successful acknowledgement and stops retrying Enter; an unchanged queue plus pending composer text remains a genuine failure.
+This exception is scoped to Codex so every other harness retains the normal cleared-composer verification contract.
+
 Directory trust dialog on first run per repo root: "Do you trust the contents of this directory?"
 Accept with Enter.
 The decision persists for the repo, so later worktrees of the same project skip it.
