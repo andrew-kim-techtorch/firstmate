@@ -9,9 +9,10 @@
 #
 # Text submission is verified: the line is typed ONCE, then Enter is sent and
 # retried (Enter only, never retyped) until the target backend reports a
-# submitted/cleared composer or an inconclusive send. If a swallowed Enter is
-# positively confirmed (the text is still sitting in the composer after all
-# retries), fm-send exits NON-ZERO so the caller knows the steer did not land
+# submitted/cleared composer, an opt-in Codex follow-up queue acknowledgement,
+# or an inconclusive send. If a swallowed Enter is positively confirmed (the
+# text is still sitting in the composer after all retries without a new Codex
+# queue row), fm-send exits NON-ZERO so the caller knows the steer did not land
 # instead of silently leaving an unsubmitted instruction.
 # Submission dispatches through the target's recorded backend; the tmux adapter
 # shares its composer/submit core with the away-mode daemon via bin/fm-tmux-lib.sh.
@@ -104,7 +105,15 @@ else
   sleep_s=${FM_SEND_SLEEP:-0.4}
   # Type once, submit, verify. Lenient: only a positively-confirmed swallow
   # (text still in the composer) is an error; an unreadable pane is assumed sent.
-  verdict=$(fm_backend_send_text_submit "$TARGET_BACKEND" "$T" "$MARK_PREFIX$*" "$retries" "$sleep_s" "$settle" "$EXPECTED_LABEL")
+  # Codex accepts a steer during an active tool call into its visible follow-up
+  # queue while leaving the queued row at the cursor. The tmux verifier would
+  # otherwise call that row pending and retry Enter. Scope queue recognition to
+  # a meta-confirmed Codex target; other harnesses keep the existing contract.
+  if [ "$TARGET_HARNESS" = codex ]; then
+    verdict=$(FM_TMUX_CODEX_QUEUE_VERIFY=1 fm_backend_send_text_submit "$TARGET_BACKEND" "$T" "$MARK_PREFIX$*" "$retries" "$sleep_s" "$settle" "$EXPECTED_LABEL")
+  else
+    verdict=$(fm_backend_send_text_submit "$TARGET_BACKEND" "$T" "$MARK_PREFIX$*" "$retries" "$sleep_s" "$settle" "$EXPECTED_LABEL")
+  fi
   case "$verdict" in
     pending)
       echo "error: text not submitted to $T (Enter swallowed; text left in composer)" >&2
@@ -115,7 +124,7 @@ else
       exit 1
       ;;
   esac
-  # Submit landed (verdict was not pending/send-failed). The cleared composer only
+  # Submit landed (verdict was not pending/send-failed). Its acknowledgement only
   # proves the text was submitted; the harness still needs a beat to spin up the
   # turn before its busy footer shows. Pause so an immediate peek catches the
   # crewmate actually working instead of the stale idle pane. FM_SEND_SETTLE=0

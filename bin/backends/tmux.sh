@@ -45,9 +45,9 @@ fm_backend_tmux_send_key() {  # <target> <key>
 }
 
 # fm_backend_tmux_send_text_submit: type <text> into <target> once, then
-# submit with Enter, retried (Enter only, never retyped) until the composer
-# clears. Re-exports fm_tmux_submit_core (bin/fm-tmux-lib.sh) verbatim; see
-# that file for the composer-verification contract and echoed verdicts.
+# submit with Enter, retried (Enter only, never retyped) until the shared
+# verifier accepts it. Re-exports fm_tmux_submit_core (bin/fm-tmux-lib.sh)
+# verbatim; see that file for the composer-verification contract and verdicts.
 fm_backend_tmux_send_text_submit() {  # <target> <text> <retries> <enter-sleep> <settle>
   fm_tmux_submit_core "$@"
 }
