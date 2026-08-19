@@ -66,6 +66,25 @@ FM_BACKEND_CONFIG_DIR="${FM_CONFIG_OVERRIDE:-$FM_HOME/config}"
 FM_BACKEND_KNOWN="tmux herdr zellij orca cmux"
 FM_BACKEND_SPAWN="tmux herdr zellij orca cmux"
 
+# SentinelOne on the verified fleet host kills a process when cwd + "/" + any
+# single argv entry exceeds 1,024 bytes. Keep 128 bytes of margin so generated
+# backend commands and free-form pane sends fail loudly before that launch.
+FM_ARGV_SAFE_CANDIDATE_BYTES=896
+
+fm_backend_argv_entry_guard() {  # <description> <argv-entry>
+  local description=$1 entry=$2 cwd cwd_bytes entry_bytes candidate
+  cwd=$(pwd -P 2>/dev/null || pwd)
+  cwd_bytes=$(printf '%s' "$cwd" | LC_ALL=C wc -c)
+  entry_bytes=$(printf '%s' "$entry" | LC_ALL=C wc -c)
+  candidate=$((cwd_bytes + 1 + entry_bytes))
+  if [ "$candidate" -gt "$FM_ARGV_SAFE_CANDIDATE_BYTES" ]; then
+    printf 'error: %s would create a %s-byte cwd/argv candidate, above the %s-byte safety budget\n' \
+      "$description" "$candidate" "$FM_ARGV_SAFE_CANDIDATE_BYTES" >&2
+    return 1
+  fi
+  return 0
+}
+
 # fm_backend_list_contains: whitespace-delimited membership without relying on
 # shell word splitting. fm-backend.sh is normally sourced by bash scripts, but
 # zsh diagnostics can source it too, so backend-name matching must stay portable.
@@ -488,6 +507,10 @@ fm_backend_send_key() {  # <backend> <target> <key> [expected-label]
 fm_backend_send_text_submit() {  # <backend> <target> <text> <retries> <enter-sleep> <settle> [expected-label]
   local backend=$1
   shift
+  if ! fm_backend_argv_entry_guard "backend text send" "$2"; then
+    printf 'send-failed'
+    return 0
+  fi
   fm_backend_source "$backend" || return 1
   case "$backend" in
     tmux) fm_backend_tmux_send_text_submit "$@" ;;
