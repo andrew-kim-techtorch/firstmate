@@ -16,9 +16,9 @@ Every place the budget is computed measures the actual string rather than a mode
 
 The disposable verification fixture used on 2026-08-19 had an 89-byte working directory, and its 130-byte verification prompt produced a 220-byte candidate.
 
-The automated launch guard in `tests/fm-spawn-dispatch-profile.test.sh:110-193` constructs 8,192-byte ship and secondmate briefs for all five adapters, rejects any launch that still contains `$(cat`, caps the backend launch candidate at 896 bytes, executes the command against an argument-recording harness, and caps every harness argument at 512 bytes.
+The automated launch guard in `tests/fm-spawn-dispatch-profile.test.sh:110-189` constructs 8,192-byte ship and secondmate briefs for all five adapters, rejects any launch that still contains `$(cat`, caps the backend launch candidate at 896 bytes, executes the command against an argument-recording harness, and caps every harness argument at 512 bytes.
 
-The refusal path is covered by `tests/fm-spawn-dispatch-profile.test.sh:195-220`, which drives an over-budget launch and asserts the spawn refuses before any endpoint, worktree, or `state/<id>.meta` exists, so a guard firing can never leave an orphaned task behind.
+The refusal path is covered by `tests/fm-spawn-dispatch-profile.test.sh:195-217`, which drives an over-budget launch and asserts the spawn refuses before any endpoint, worktree, or `state/<id>.meta` exists, so a guard firing can never leave an orphaned task behind.
 
 ## Adapter verification
 
@@ -83,7 +83,7 @@ The Orca launch and send paths at `bin/backends/orca.sh:162-171` and `bin/backen
 
 The cmux launch and send paths at `bin/backends/cmux.sh:467-469` and `bin/backends/cmux.sh:583-595` pass text to `cmux` as one argument.
 
-All five backends receive generated launch text through `bin/fm-spawn.sh:1047`, bounded by the 896-byte guard at `bin/fm-spawn.sh:685` before any resource for the task exists.
+All five backends receive generated launch text through `bin/fm-spawn.sh:1047`, bounded by the 896-byte guard at `bin/fm-spawn.sh:680` before any resource for the task exists.
 
 All five backends receive interactive text through `bin/fm-backend.sh:526-542`, where the same runtime guard returns `send-failed` before invoking the backend command.
 
@@ -97,7 +97,7 @@ It is bounded at composition time against `fm_backend_argv_entry_budget` rather 
 
 Leaving that aggregate to the transport guard would have been a silent regression rather than a safety net, because the buffer is only cleared on a confirmed inject, so one oversized digest would have refused the same content on every later flush and an away captain would have stopped hearing about problems entirely.
 
-That bounded-delivery contract is pinned by `tests/fm-daemon.test.sh:247-282`, which fails if an oversized buffer produces a refusal instead of a bounded, cleared delivery.
+That bounded-delivery contract is pinned by `tests/fm-daemon.test.sh:276-303`, which fails if an oversized buffer produces a refusal instead of a bounded, cleared delivery.
 
 The project-name aggregate in `bin/fm-home-seed.sh:737-765` previously crossed into `awk` through one `-v` argument and was unbounded by the number of selected projects.
 

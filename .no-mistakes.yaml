@@ -2,11 +2,16 @@
 
 # Run the firstmate bash behavior suite deterministically as the test-step
 # baseline, instead of delegating to an agent (an agent-driven test step has
-# crashed the daemon). Mirrors .github/workflows/ci.yml: iterate every
-# tests/*.test.sh, run each, and fail the step if any one exits non-zero. The
-# e2e tests need tmux on PATH, which the firstmate environment provides.
+# crashed the daemon). Same coverage as .github/workflows/ci.yml - every
+# tests/*.test.sh runs and the step fails if any one exits non-zero - but four
+# at a time, because serially the suite now takes ~10 minutes and was hitting
+# the gate's own test-step timeout mid-file. Each test suite already isolates
+# its own mktemp dirs and private tmux sockets, so they are safe to overlap;
+# each file's output is buffered and printed as one labelled block so a
+# failure is still attributable. xargs exits non-zero when any invocation does.
+# The e2e tests need tmux on PATH, which the firstmate environment provides.
 commands:
-  test: 'command -v tmux >/dev/null || { echo "tmux is required for e2e tests" >&2; exit 1; }; tmux -V; rc=0; for t in tests/*.test.sh; do echo "== $t =="; bash "$t" || rc=1; done; exit "$rc"'
+  test: 'command -v tmux >/dev/null || { echo "tmux is required for e2e tests" >&2; exit 1; }; tmux -V; ls tests/*.test.sh | xargs -P 4 -I{} sh -c ''out=$(bash "{}" 2>&1); rc=$?; printf "== %s (rc=%s) ==\n%s\n" "{}" "$rc" "$out"; exit $rc'''
 
 # Keep test evidence out of this repo; it stays in a temp dir instead. CI
 # rejects tracked .no-mistakes paths here, so flipping this to true breaks CI

@@ -192,6 +192,13 @@ the marker lets firstmate distinguish it from a real captain message.
   landed, using the same dim-ghost-aware and border-aware detector (tmux) or
   structural border-row classifier (herdr) so a ghost-only or bordered-empty
   claude composer counts as submitted rather than a false swallowed Enter.
+- **Bounded digest** - the digest is sized at composition time against the
+  outbound argv budget (`bin/fm-backend.sh`, docs/argv-transport.md), so the
+  transport guard never becomes the thing that decides an escalation is
+  undeliverable. An oversized buffer delivers its newest items plus a
+  `+N earlier escalation(s), see <log>` tail, and the summarised older items go
+  to the daemon log as the buffer clears, so the same overflow cannot recur with
+  the same content.
 - **Marker strip** - `strip_injection_marker` removes the sentinel prefix before
   classification or relay, so the digest text firstmate sees is clean.
 - **Portable singleton lock** - the daemon uses the repo's portable lock helper
