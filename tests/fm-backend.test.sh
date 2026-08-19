@@ -780,7 +780,7 @@ test_spawn_conformance_old_vs_new() {
   # accidentally-empty log (e.g. a fake tmux path typo) cannot pass silently.
   assert_contains "$(cat "$log_new")" $'\x1f''new-window' "spawn tmux log missing new-window"
   assert_contains "$(cat "$log_new")" $'\x1f''treehouse get' "spawn tmux log missing the treehouse get send"
-  assert_contains "$(cat "$log_new")" $'\x1f''-l'$'\x1f'"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false claude --dangerously-skip-permissions 'Read and follow the brief at $data/$id/brief.md.'" \
+  assert_contains "$(cat "$log_new")" $'\x1f''-l'$'\x1f'"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false claude --dangerously-skip-permissions 'Read and follow the brief at '\\''$data/$id/brief.md'\\''.'" \
     "spawn tmux log missing the literal launch-command send"
 
   rm -rf "/tmp/fm-$id"

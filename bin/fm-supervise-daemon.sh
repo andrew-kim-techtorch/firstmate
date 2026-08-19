@@ -534,21 +534,88 @@ escalate_add() {  # <state> <distilled-item>
   printf '%s\n' "$item" >> "$buf"
 }
 
+# Select the newest buffered items that fit inside <item-budget> bytes, joined
+# with the literal " | " separator, and report how many older items were left
+# out. Prints "<dropped-count>\t<joined-items>". LC_ALL=C so length() counts
+# bytes, which is what the argv budget is measured in. The newest item alone is
+# always delivered, truncated to the budget if it cannot fit whole: away-mode
+# delivery is mandatory, so an oversized item is trimmed rather than dropped.
+_escalate_select() {  # <buf> <item-budget>
+  LC_ALL=C awk -v limit="$2" '
+    { line[NR]=$0 }
+    END {
+      first=NR+1; total=0
+      for (i=NR; i>=1; i--) {
+        add=length(line[i]) + (first<=NR ? 3 : 0)
+        if (total + add > limit) break
+        total+=add; first=i
+      }
+      if (first>NR) { first=NR; line[NR]=substr(line[NR], 1, (limit>0 ? limit : 0)) }
+      out=line[first]
+      for (i=first+1; i<=NR; i++) out = out " | " line[i]
+      printf "%d\t%s\n", first-1, out
+    }
+  ' "$1" 2>/dev/null
+}
+
 # Flush the escalation buffer as ONE batched, single-line digest to the
 # supervisor pane. Returns 0 on successful inject (or empty buffer), non-zero on
 # inject failure (buffer preserved for retry / catch-up).
+#
+# The digest is BOUNDED at composition time against the outbound argv budget
+# (bin/fm-backend.sh). The transport guard must never be the thing that decides
+# an away-mode escalation is undeliverable: an unbounded join would start
+# refusing once ~8-10 events accumulated, and because the buffer is only cleared
+# on a confirmed inject, every later flush would refuse the same oversized
+# content forever - the captain would silently stop hearing about problems while
+# away. So an oversized buffer delivers its NEWEST items plus a
+# "+N earlier escalation(s)" tail, and the summarised older items are written to
+# the daemon log (retrievable) as the buffer is cleared, so the same overflow
+# cannot recur immediately with the same content.
 escalate_flush() {  # <state>
-  local state=$1 buf item n msg
+  local state=$1 buf n msg budget item_budget selection dropped items logf
+  local LOG=${LOG:-$state/.supervise-daemon.log}
   buf="$state/.subsuper-escalations"
   [ -s "$buf" ] || return 0
+  logf=$LOG
   n=$(wc -l < "$buf" 2>/dev/null || echo 0)
-  # Join buffered items with the literal " | " separator into one digest line.
-  msg=$(awk 'NR>1{printf " | "} {printf "%s",$0} END{print ""}' "$buf" 2>/dev/null)
+  n=$((n))
+  # Worst-case wrapper accounting: the overflow tail is sized for every buffered
+  # item being summarised, so adding the real (smaller) tail can only leave slack.
+  budget=$(fm_backend_argv_entry_budget)
+  item_budget=$(( budget
+    - $(fm_backend_argv_bytes "$(_escalate_wrap "$n" '')")
+    - $(fm_backend_argv_bytes "$(_escalate_overflow_tail "$n" "$logf")") ))
+  selection=$(_escalate_select "$buf" "$item_budget")
+  dropped=${selection%%$'\t'*}
+  items=${selection#*$'\t'}
+  case "$dropped" in ''|*[!0-9]*) dropped=$n; items= ;; esac
+  [ -n "$items" ] || items="see $logf"
+  [ "$dropped" -gt 0 ] && items="$items$(_escalate_overflow_tail "$dropped" "$logf")"
+  msg=$(_escalate_wrap "$n" "$items")
+  # Backstop for an absurdly deep cwd, where even one item cannot fit: send the
+  # pointer alone rather than letting the transport guard refuse everything.
+  if [ "$(fm_backend_argv_bytes "$msg")" -gt "$budget" ]; then
+    dropped=$n
+    msg=$(_escalate_wrap "$n" "oversized digest, see $logf")
+  fi
+  if inject_msg "$msg" "$state"; then
+    if [ "$dropped" -gt 0 ]; then
+      log "escalation digest bounded to the outbound argv budget: injected $(( n - dropped )) of $n event(s); summarised: $(head -n "$dropped" "$buf" | tr '\n' '|')"
+    fi
+    : > "$buf"; rm -f "${buf}.since" "$state/.subsuper-inject-wedged"; return 0
+  fi
+  return 1
+}
+
+_escalate_wrap() {  # <event-count> <joined-items>
   # Single-line wrapper: no embedded newlines (inject_msg also collapses as a
   # safety net, but keeping the source single-line makes the intent explicit).
-  msg=$(printf 'Supervisor escalate (%s event(s)): %s (pre-read; re-arm not needed — watcher daemon-managed)' "$n" "$msg")
-  if inject_msg "$msg" "$state"; then : > "$buf"; rm -f "${buf}.since" "$state/.subsuper-inject-wedged"; return 0; fi
-  return 1
+  printf 'Supervisor escalate (%s event(s)): %s (pre-read; re-arm not needed — watcher daemon-managed)' "$1" "$2"
+}
+
+_escalate_overflow_tail() {  # <dropped-count> <log-path>
+  printf ' ... +%s earlier escalation(s), see %s' "$1" "$2"
 }
 
 # Raise a loud, rate-limited alarm when escalations cannot be delivered after

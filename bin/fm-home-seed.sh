@@ -739,7 +739,7 @@ sync_project_registry() {
   shift
   sub_reg="$home/data/projects.md"
   tmp="$sub_reg.tmp.$$"
-  names_file="$SEED_BACKUP_DIR/selected-projects"
+  names_file=$(mktemp) || return 1
   printf '%s\n' "$@" > "$names_file"
   if [ -f "$sub_reg" ]; then
     awk -v names_file="$names_file" '
@@ -760,6 +760,7 @@ sync_project_registry() {
     fi
     printf '%s\n' "$line" >> "$tmp"
   done
+  rm -f "$names_file"
   mv "$tmp" "$sub_reg"
 }
 

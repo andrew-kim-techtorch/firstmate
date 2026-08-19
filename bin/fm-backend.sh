@@ -69,7 +69,26 @@ FM_BACKEND_SPAWN="tmux herdr zellij orca cmux"
 # SentinelOne on the verified fleet host kills a process when cwd + "/" + any
 # single argv entry exceeds 1,024 bytes. Keep 128 bytes of margin so generated
 # backend commands and free-form pane sends fail loudly before that launch.
-FM_ARGV_SAFE_CANDIDATE_BYTES=896
+# Overridable so a test can drive the refusal path without a near-PATH_MAX cwd.
+FM_ARGV_SAFE_CANDIDATE_BYTES=${FM_ARGV_SAFE_CANDIDATE_BYTES:-896}
+
+fm_backend_argv_bytes() {  # <text> -> byte length of the text
+  local bytes
+  bytes=$(printf '%s' "$1" | LC_ALL=C wc -c)
+  printf '%s' "$((bytes))"
+}
+
+# The bytes one argv entry may still use from the current cwd. Callers that
+# COMPOSE an outbound message (rather than merely forwarding one) bound it against
+# this budget so fm_backend_argv_entry_guard stays a backstop and never becomes
+# the thing that decides a message is undeliverable. Can go negative on an
+# absurdly deep cwd; callers must treat a non-positive budget as "does not fit".
+fm_backend_argv_entry_budget() {  # -> max safe argv-entry bytes from the current cwd
+  local cwd cwd_bytes
+  cwd=$(pwd -P 2>/dev/null || pwd)
+  cwd_bytes=$(printf '%s' "$cwd" | LC_ALL=C wc -c)
+  printf '%s' "$((FM_ARGV_SAFE_CANDIDATE_BYTES - cwd_bytes - 1))"
+}
 
 fm_backend_argv_entry_guard() {  # <description> <argv-entry>
   local description=$1 entry=$2 cwd cwd_bytes entry_bytes candidate

@@ -649,6 +649,48 @@ real_path_or_raw() {  # <path>
   fi
 }
 
+# The launch command is assembled and argv-guarded HERE, before any endpoint,
+# worktree, task temp root, hook file, or state/<id>.meta exists. A guard that
+# refused later would exit having already created a window/tab/Orca worktree and
+# a meta file that recovery reads as in-flight work with a dead endpoint, so the
+# check runs while there is still nothing to orphan. Everything it needs
+# (brief path, harness template, model/effort flags, turn-end and pi-extension
+# paths, the secondmate FM_HOME prefix) is already resolved above.
+mkdir -p "$STATE"
+STATE_REAL=$(cd "$STATE" && pwd -P)
+TURNEND="$STATE_REAL/$ID.turn-ended"
+# The path is quoted INSIDE the prompt text the agent reads, matching the string
+# every adapter was empirically verified against (docs/argv-transport.md) and
+# keeping a sentence-final period from reading as part of the filename.
+BRIEF_PROMPT="Read and follow the brief at '$BRIEF'."
+sq_brief_prompt=$(shell_quote "$BRIEF_PROMPT")
+sq_turnend=$(shell_quote "$TURNEND")
+sq_piext=$(shell_quote "$STATE/$ID.pi-ext.ts")
+MODELFLAG=$(model_flag_for_harness "$HARNESS" "$MODEL")
+EFFORTFLAG=$(effort_flag_for_harness "$HARNESS" "$EFFORT")
+LAUNCH=${LAUNCH//__MODELFLAG__/$MODELFLAG}
+LAUNCH=${LAUNCH//__EFFORTFLAG__/$EFFORTFLAG}
+LAUNCH=${LAUNCH//__BRIEFPROMPT__/$sq_brief_prompt}
+LAUNCH=${LAUNCH//__TURNEND__/$sq_turnend}
+LAUNCH=${LAUNCH//__PIEXT__/$sq_piext}
+if [ "$KIND" = secondmate ]; then
+  sq_home=$(shell_quote "$PROJ_ABS")
+  LAUNCH="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME=$sq_home $LAUNCH"
+fi
+fm_backend_argv_entry_guard "backend agent launch" "$LAUNCH" || exit 1
+
+# The harness process runs with its worktree as cwd, so the brief prompt's own
+# budget is measured from there. A secondmate's worktree is its home and is
+# already known, so that check is hoisted too; a pooled treehouse or Orca
+# worktree cannot exist before the endpoint by construction, so its check runs
+# at the earliest point WT is final - still before the task temp root, the
+# turn-end hooks, the meta file, and Orca's abort-cleanup handover.
+guard_brief_prompt_from_worktree() {
+  [ -n "$WT" ] || return 0
+  ( cd "$WT" && fm_backend_argv_entry_guard "agent brief prompt" "$BRIEF_PROMPT" ) || exit 1
+}
+guard_brief_prompt_from_worktree
+
 # Session-provider container-ensure + task creation. tmux stays exactly as P1
 # left it (same session-name / new-window sequence, see bin/backends/tmux.sh);
 # a herdr spawn goes through the version-gated, workspace-per-HOME,
@@ -826,6 +868,7 @@ if [ "$KIND" != secondmate ] && [ "$BACKEND" != orca ]; then
 
   validate_spawn_worktree "treehouse get" "$T"
 fi
+guard_brief_prompt_from_worktree
 
 # Per-task temp root: /tmp/fm-<id>/ with Go's build temp nested at gotmp/. Go won't
 # create GOTMPDIR, so mkdir before it is used; fm-teardown removes the whole root.
@@ -836,11 +879,10 @@ TASK_TMP="/tmp/fm-$ID"
 mkdir -p "$TASK_TMP/gotmp"
 
 # Per-harness turn-end hook: a file that touches state/<id>.turn-ended when the
-# agent finishes a turn. Worktree-resident hooks are kept out of git's view so
-# they never block teardown's dirty check or leak into a commit.
-mkdir -p "$STATE"
-STATE_REAL=$(cd "$STATE" && pwd -P)
-TURNEND="$STATE_REAL/$ID.turn-ended"
+# agent finishes a turn. TURNEND itself is resolved with the launch assembly
+# above, because the launch command carries it for codex. Worktree-resident hooks
+# are kept out of git's view so they never block teardown's dirty check or leak
+# into a commit.
 exclude_path() {
   local rel=$1 EXCL
   EXCL=$(git -C "$WT" rev-parse --git-path info/exclude 2>/dev/null || true)
@@ -997,23 +1039,6 @@ META_WINDOW=$T
 } > "$STATE/$ID.meta"
 [ "$BACKEND" = orca ] && ORCA_ABORT_CLEANUP=0
 
-BRIEF_PROMPT="Read and follow the brief at $BRIEF."
-sq_brief_prompt=$(shell_quote "$BRIEF_PROMPT")
-sq_turnend=$(shell_quote "$TURNEND")
-sq_piext=$(shell_quote "$STATE/$ID.pi-ext.ts")
-MODELFLAG=$(model_flag_for_harness "$HARNESS" "$MODEL")
-EFFORTFLAG=$(effort_flag_for_harness "$HARNESS" "$EFFORT")
-LAUNCH=${LAUNCH//__MODELFLAG__/$MODELFLAG}
-LAUNCH=${LAUNCH//__EFFORTFLAG__/$EFFORTFLAG}
-LAUNCH=${LAUNCH//__BRIEFPROMPT__/$sq_brief_prompt}
-LAUNCH=${LAUNCH//__TURNEND__/$sq_turnend}
-LAUNCH=${LAUNCH//__PIEXT__/$sq_piext}
-if [ "$KIND" = secondmate ]; then
-  sq_home=$(shell_quote "$PROJ_ABS")
-  LAUNCH="FM_ROOT_OVERRIDE= FM_STATE_OVERRIDE= FM_DATA_OVERRIDE= FM_PROJECTS_OVERRIDE= FM_CONFIG_OVERRIDE= FM_HOME=$sq_home $LAUNCH"
-fi
-fm_backend_argv_entry_guard "backend agent launch" "$LAUNCH" || exit 1
-( cd "$WT" && fm_backend_argv_entry_guard "agent brief prompt" "$BRIEF_PROMPT" ) || exit 1
 # Export GOTMPDIR into the crewmate's pane shell so the agent and every child
 # process (go build, go test, ...) inherit it. Sent before the launch command so
 # the env is set when the agent starts; the brief sleep lets the export land.
