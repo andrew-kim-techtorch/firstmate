@@ -19,6 +19,7 @@ make_spawn_fakebin() {
   cat > "$fakebin/tmux" <<'SH'
 #!/usr/bin/env bash
 set -u
+[ -n "${FM_FAKE_TMUX_CMD_LOG:-}" ] && printf '%s\n' "${1:-}" >> "$FM_FAKE_TMUX_CMD_LOG"
 case "$*" in
   *"#{pane_current_path}"*) printf '%s\n' "${FM_FAKE_PANE_PATH:-}"; exit 0 ;;
 esac
@@ -88,7 +89,8 @@ run_spawn() {
     FM_STATE_OVERRIDE="$home/state" FM_DATA_OVERRIDE="$home/data" \
     FM_PROJECTS_OVERRIDE="$home/projects" FM_CONFIG_OVERRIDE="$home/config" \
     FM_SPAWN_NO_GUARD=1 FM_FAKE_PANE_PATH="$wt" TMUX="fake,1,0" \
-    FM_FAKE_LAUNCH_LOG="$launchlog" GROK_HOME="$home/grok-home" PATH="$fakebin:$PATH" \
+    FM_FAKE_LAUNCH_LOG="$launchlog" FM_FAKE_TMUX_CMD_LOG="${FM_FAKE_TMUX_CMD_LOG:-}" \
+    GROK_HOME="$home/grok-home" PATH="$fakebin:$PATH" \
     "$SPAWN" "$@" 2>&1
 }
 
@@ -105,7 +107,116 @@ assert_meta_profile() {
   assert_grep "effort=$effort" "$meta" "meta missing effort=$effort"
 }
 
-test_no_profile_keeps_claude_launch_unchanged() {
+make_argv_capture_harnesses() {
+  local fakebin=$1 harness
+  for harness in claude codex opencode pi grok; do
+    cat > "$fakebin/$harness" <<'SH'
+#!/usr/bin/env bash
+set -u
+for arg in "$@"; do
+  printf '%s\t%s\n' "${#arg}" "$arg" >> "$FM_TEST_ARG_LENGTH_LOG"
+done
+SH
+    chmod +x "$fakebin/$harness"
+  done
+}
+
+# The shipped prompt quotes the brief path inside the text the agent reads
+# (docs/argv-transport.md), so shell_quote escapes those inner quotes when the
+# prompt becomes one pane-shell word.
+shipped_brief_prompt() {  # <brief-path> -> prompt text as the harness receives it
+  printf "Read and follow the brief at '%s'." "$1"
+}
+
+expected_brief_prompt_arg() {  # <brief-path> -> shell-quoted prompt as it appears in the launch
+  local q="'\\''"
+  printf '%s' "'Read and follow the brief at ${q}$1${q}.'"
+}
+
+assert_launch_uses_bounded_brief_path() {
+  local label=$1 launch=$2 brief=$3 fakebin=$4 arglog max_arg launch_candidate whole_file_substitution
+  arglog="$fakebin/$label.argv.log"
+  # The command-substitution prefix is deliberate literal test input.
+  # shellcheck disable=SC2016
+  whole_file_substitution='$(cat '
+  : > "$arglog"
+  assert_not_contains "$launch" "$whole_file_substitution" "$label: launch must not expand a file into argv"
+  assert_contains "$launch" "$(expected_brief_prompt_arg "$brief")" \
+    "$label: launch did not carry the exact brief path instruction"
+  launch_candidate=$((${#PWD} + 1 + ${#launch}))
+  [ "$launch_candidate" -le 896 ] \
+    || fail "$label: backend launch argv candidate is $launch_candidate bytes, above the 896-byte safety budget"
+  FM_TEST_ARG_LENGTH_LOG="$arglog" PATH="$fakebin:$PATH" bash -c "$launch" \
+    || fail "$label: captured launch command did not execute against the fake harness"
+  max_arg=$(awk -F '\t' 'BEGIN { max=0 } $1 > max { max=$1 } END { print max }' "$arglog")
+  [ "$max_arg" -le 512 ] \
+    || fail "$label: harness received a $max_arg-byte argv entry, above the 512-byte safety budget"
+  assert_grep "$(shipped_brief_prompt "$brief")" "$arglog" \
+    "$label: fake harness did not receive the brief path instruction"
+}
+
+test_all_launch_templates_bound_brief_argv() {
+  local harness rec id out status launch brief sm
+  for harness in claude codex opencode pi grok; do
+    id="argv-ship-$harness-z20"
+    rec=$(make_spawn_case "argv-ship-$harness" "$harness" "$id")
+    read_case_record "$rec"
+    make_argv_capture_harnesses "$FAKEBIN_DIR"
+    brief="$HOME_DIR/data/$id/brief.md"
+    awk 'BEGIN { for (i=0; i<8192; i++) printf "A"; print "" }' > "$brief"
+    out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR" --harness "$harness")
+    status=$?
+    expect_code 0 "$status" "$harness ship launch should succeed"
+    launch=$(cat "$LAUNCH_LOG")
+    assert_launch_uses_bounded_brief_path "ship-$harness" "$launch" "$brief" "$FAKEBIN_DIR"
+
+    id="argv-secondmate-$harness-z21"
+    rec=$(make_spawn_case "argv-secondmate-$harness" "$harness" "$id")
+    read_case_record "$rec"
+    make_argv_capture_harnesses "$FAKEBIN_DIR"
+    sm="$CASE_DIR/secondmate-home"
+    make_seeded_secondmate_home "$sm" "$id"
+    brief="$sm/data/charter.md"
+    awk 'BEGIN { for (i=0; i<8192; i++) printf "B"; print "" }' > "$brief"
+    brief="$(cd "$sm" && pwd -P)/data/charter.md"
+    out=$(run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$sm" --harness "$harness" --secondmate)
+    status=$?
+    expect_code 0 "$status" "$harness secondmate launch should succeed"
+    launch=$(cat "$LAUNCH_LOG")
+    assert_launch_uses_bounded_brief_path "secondmate-$harness" "$launch" "$brief" "$FAKEBIN_DIR"
+  done
+  pass "all ship and secondmate launch templates keep long brief contents out of process argv"
+}
+
+# Regression: the argv guard must refuse while there is still nothing to orphan.
+# Refusing after the endpoint, worktree and state/<id>.meta existed left a dead
+# task recovery reads as in-flight work, so a safety guard produced exactly the
+# wreckage it exists to prevent.
+test_launch_argv_overflow_refuses_before_creating_resources() {
+  local rec id out status cmdlog
+  id=argv-overflow-z22
+  rec=$(make_spawn_case argv-overflow claude "$id")
+  read_case_record "$rec"
+  cmdlog="$CASE_DIR/tmux-cmds.log"
+  : > "$cmdlog"
+  out=$(
+    export FM_ARGV_SAFE_CANDIDATE_BYTES=$(( ${#PWD} + 40 ))
+    export FM_FAKE_TMUX_CMD_LOG="$cmdlog"
+    run_spawn "$HOME_DIR" "$WT_DIR" "$FAKEBIN_DIR" "$LAUNCH_LOG" "$id" "$PROJ_DIR"
+  )
+  status=$?
+  [ "$status" -ne 0 ] || fail "an over-budget launch should refuse the spawn"$'\n'"$out"
+  assert_contains "$out" "above the $(( ${#PWD} + 40 ))-byte safety budget" \
+    "refusal did not explain the argv safety budget"
+  [ ! -e "$HOME_DIR/state/$id.meta" ] \
+    || fail "refused spawn left a meta file recovery would read as in-flight work"
+  assert_not_contains "$(cat "$cmdlog")" "new-window" \
+    "refused spawn created a runtime endpoint before guarding the launch"
+  [ ! -s "$LAUNCH_LOG" ] || fail "refused spawn still sent a launch command"
+  pass "an over-budget launch refuses before any endpoint, worktree, or meta file exists"
+}
+
+test_no_profile_uses_claude_brief_path_prompt() {
   local rec id out status expected launch
   id=profile-off-z1
   rec=$(make_spawn_case profile-off claude "$id")
@@ -118,9 +229,9 @@ test_no_profile_keeps_claude_launch_unchanged() {
   assert_meta_profile "$HOME_DIR/state/$id.meta" claude default default
 
   launch=$(cat "$LAUNCH_LOG")
-  expected="CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false claude --dangerously-skip-permissions \"\$(cat '$HOME_DIR/data/$id/brief.md')\""
-  [ "$launch" = "$expected" ] || fail "no-profile claude launch changed"$'\n'"expected: $expected"$'\n'"actual:   $launch"
-  pass "no --model/--effort records defaults and keeps the claude launch byte-identical"
+  expected="CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false claude --dangerously-skip-permissions $(expected_brief_prompt_arg "$HOME_DIR/data/$id/brief.md")"
+  [ "$launch" = "$expected" ] || fail "no-profile claude launch did not use the brief path prompt"$'\n'"expected: $expected"$'\n'"actual:   $launch"
+  pass "no --model/--effort records defaults and gives claude a brief path prompt"
 }
 
 test_active_dispatch_profile_requires_explicit_harness_for_ship() {
@@ -285,7 +396,7 @@ test_grok_omits_invalid_max_reasoning_effort() {
   expect_code 0 "$status" "grok spawn with unsupported max reasoning effort should omit the effort flag"
   assert_meta_profile "$HOME_DIR/state/$id.meta" grok grok-4 max
   launch=$(cat "$LAUNCH_LOG")
-  assert_contains "$launch" "grok --always-approve --model 'grok-4' \"\$(cat " \
+  assert_contains "$launch" "grok --always-approve --model 'grok-4' 'Read and follow the brief at " \
     "grok launch did not preserve the model flag when max effort was omitted"
   assert_not_contains "$launch" "--reasoning-effort" "grok launch must omit unsupported max reasoning effort"
   assert_not_contains "$launch" "--effort" "grok launch must not fall back to --effort for reasoning effort"
@@ -367,7 +478,7 @@ test_active_dispatch_profile_does_not_block_secondmate_launch() {
   pass "active crew-dispatch profile does not block secondmate launches"
 }
 
-test_no_profile_keeps_claude_launch_unchanged
+test_no_profile_uses_claude_brief_path_prompt
 test_active_dispatch_profile_requires_explicit_harness_for_ship
 test_active_dispatch_profile_requires_explicit_harness_for_scout
 test_active_dispatch_profile_allows_explicit_harness
@@ -382,5 +493,7 @@ test_opencode_threads_model_and_ignores_effort_axis
 test_pi_omits_invalid_max_effort
 test_batch_forwards_shared_profile_flags
 test_active_dispatch_profile_does_not_block_secondmate_launch
+test_all_launch_templates_bound_brief_argv
+test_launch_argv_overflow_refuses_before_creating_resources
 
 echo "# all fm-spawn-dispatch-profile tests passed"

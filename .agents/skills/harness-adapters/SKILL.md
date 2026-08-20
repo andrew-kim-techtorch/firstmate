@@ -145,7 +145,7 @@ If a pane shows the exit banner, relaunch with `--continue` to resume the sessio
 | Interrupt | single Escape |
 
 Pi has no permission system, so crewmates are always autonomous.
-Keep the brief as one positional argument.
+Keep the launch prompt as one positional argument.
 Multiple positional args become separate queued messages; `fm-spawn`'s template already does this correctly.
 
 Project trust dialog can appear on the first pi run in any not-yet-trusted directory, observed even on clean worktrees.
@@ -159,7 +159,7 @@ Pi sets `PI_CODING_AGENT=true` for its children; this is its harness-detection e
 ## grok (VERIFIED 2026-06-29, grok 0.2.73; slash-submit behavior re-verified 2026-07-03, grok 0.2.82)
 
 Grok Build TUI (`grok`), a Claude-Code-compatible CLI from xAI.
-Launch with a positional prompt: `grok --always-approve "$(cat <brief>)"`.
+Launch with a positional prompt: `grok --always-approve "Read and follow the brief at '<brief>'."` (every adapter passes the brief as a path, never its contents - docs/argv-transport.md).
 
 | Fact | Value |
 |---|---|
@@ -180,7 +180,7 @@ Startup dialog: the "Run Grok Build in a project directory?" project picker appe
 `fm-spawn` launches inside the treehouse worktree (a git repo root), so the picker never appears and grok treats the worktree as a trusted project automatically - no post-launch keystroke is needed.
 Pin `[hints] project_picker_disabled = true` in `~/.grok/config.toml` if a non-project launch ever needs to skip it.
 
-**Known gap, unfixed (found 2026-07-03, not yet in scope of any fix):** a freshly-dismissed, never-typed-into grok composer shows a placeholder ("Type a message...") styled with a dark 24-bit TRUECOLOR foreground, not the SGR-2 dim/faint attribute `fm_tmux_strip_ghost` detects, so it is NOT stripped and reads as real pending text - `FM_COMPOSER_IDLE_RE` is NOT already set to cover it. Worse, live-verified: in that exact pristine placeholder-only state, tmux's own `#{cursor_y}` points at the composer box's BOTTOM BORDER row, one row below the actual text row (the box appears to render one row lower before any real typing starts); once real text is typed the cursor correctly aligns with the text row again. A correct fix needs a row-window read near `cursor_y` (or a structural scan like the herdr adapter's composer-row finder, `bin/backends/herdr.sh`), not just a wider idle regex. In practice `fm-spawn` launches grok with the brief as its initial prompt, so a live task's composer is never observed in this pristine pre-typing state - but this is unverified for every path (e.g. a steer sent before grok's first real turn settles) and needs dedicated investigation before relying on it.
+**Known gap, unfixed (found 2026-07-03, not yet in scope of any fix):** a freshly-dismissed, never-typed-into grok composer shows a placeholder ("Type a message...") styled with a dark 24-bit TRUECOLOR foreground, not the SGR-2 dim/faint attribute `fm_tmux_strip_ghost` detects, so it is NOT stripped and reads as real pending text - `FM_COMPOSER_IDLE_RE` is NOT already set to cover it. Worse, live-verified: in that exact pristine placeholder-only state, tmux's own `#{cursor_y}` points at the composer box's BOTTOM BORDER row, one row below the actual text row (the box appears to render one row lower before any real typing starts); once real text is typed the cursor correctly aligns with the text row again. A correct fix needs a row-window read near `cursor_y` (or a structural scan like the herdr adapter's composer-row finder, `bin/backends/herdr.sh`), not just a wider idle regex. In practice `fm-spawn` launches grok with an initial prompt, so a live task's composer is never observed in this pristine pre-typing state - but this is unverified for every path (e.g. a steer sent before grok's first real turn settles) and needs dedicated investigation before relying on it.
 
 Turn-end hook: grok fires a `Stop` hook at every turn boundary, giving firstmate a precise per-turn wake instead of only stale-pane detection.
 grok loads PROJECT hooks (`<worktree>/.grok/hooks/`, `<worktree>/.claude/settings.local.json`) only after the folder is granted hook-trust in `~/.grok/trusted_folders.toml`, which is not automatic and which firstmate will not establish by editing grok's own managed trust store.

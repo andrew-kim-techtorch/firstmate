@@ -643,6 +643,17 @@ test_send_conformance_old_vs_new() {
   pass "fm-send.sh: --key, plain text, and /skill tmux command logs are byte-identical old vs new (send-keys -l, Enter submission preserved)"
 }
 
+test_send_guard_refuses_long_argv() {
+  local text verdict err
+  text=$(awk 'BEGIN { for (i=0; i<1024; i++) printf "A" }')
+  err="$TMP_ROOT/send-argv-guard.err"
+  verdict=$(fm_backend_send_text_submit tmux sess:win "$text" 1 0 0 2> "$err")
+  [ "$verdict" = send-failed ] || fail "long backend text should return send-failed, got '$verdict'"
+  assert_grep "above the 896-byte safety budget" "$err" \
+    "long backend text refusal did not explain the argv safety budget"
+  pass "backend text sends fail loudly before an over-length argv process launch"
+}
+
 # --- old vs new: fm-peek.sh --------------------------------------------------
 
 make_peek_fakebin() {  # <dir> <capture-output> -> echoes fakebin dir
@@ -725,7 +736,7 @@ run_spawn_case() {  # <bin-root> <fakebin> <log> <state> <data> <config> <proj> 
 }
 
 test_spawn_conformance_old_vs_new() {
-  local old_bin fb proj wt data id log_old log_new out_old out_new
+  local old_bin fb proj wt data id log_old log_new log_old_normalized log_new_normalized out_old out_new
   local state_old state_new config_old config_new
   old_bin=$(build_old_bin spawn-old)
   proj="$TMP_ROOT/spawn-project"; wt="$TMP_ROOT/spawn-wt"; data="$TMP_ROOT/spawn-data"
@@ -747,25 +758,33 @@ test_spawn_conformance_old_vs_new() {
   expect_code 0 "$rc_old" "old fm-spawn.sh should succeed"$'\n'"$out_old"
   expect_code 0 "$rc_new" "new fm-spawn.sh should succeed"$'\n'"$out_new"
   # stdout intentionally diverged from BASE_REF: the dispatch-echo change added
-  # model=/effort= to the spawned line plus a dispatch summary line. The backend
-  # refactor conformance guard is the tmux command-log diff below, unchanged.
+  # model=/effort= to the spawned line plus a dispatch summary line.
   assert_contains "$out_new" "spawned $id harness=claude model=default effort=default kind=ship mode=no-mistakes yolo=off window=firstmate:fm-$id worktree=$wt" \
     "spawn output missing the expected summary line"
   assert_contains "$out_new" "dispatch: $id -> claude/default/default (ship, no-mistakes, yolo=off)" \
     "spawn output missing the dispatch summary line"
 
-  diff -u "$log_old" "$log_new" > "$TMP_ROOT/spawn-diff.txt" 2>&1 \
+  # The launch text now names the brief file instead of expanding its contents
+  # into one argv entry. Normalize only that intentional payload delta; every
+  # tmux operation and argument around it must remain byte-identical.
+  log_old_normalized="$TMP_ROOT/spawn-old.normalized.log"
+  log_new_normalized="$TMP_ROOT/spawn-new.normalized.log"
+  awk 'index($0, "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false claude --dangerously-skip-permissions") { print "LAUNCH_PAYLOAD"; next } { print }' \
+    "$log_old" > "$log_old_normalized"
+  awk 'index($0, "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false claude --dangerously-skip-permissions") { print "LAUNCH_PAYLOAD"; next } { print }' \
+    "$log_new" > "$log_new_normalized"
+  diff -u "$log_old_normalized" "$log_new_normalized" > "$TMP_ROOT/spawn-diff.txt" 2>&1 \
     || fail "fm-spawn.sh: tmux command log differs old vs new"$'\n'"$(cat "$TMP_ROOT/spawn-diff.txt")"
 
   # Sanity: the log actually captured the session/window lifecycle so an
   # accidentally-empty log (e.g. a fake tmux path typo) cannot pass silently.
   assert_contains "$(cat "$log_new")" $'\x1f''new-window' "spawn tmux log missing new-window"
   assert_contains "$(cat "$log_new")" $'\x1f''treehouse get' "spawn tmux log missing the treehouse get send"
-  assert_contains "$(cat "$log_new")" $'\x1f''-l'$'\x1f'"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false claude --dangerously-skip-permissions \"\$(cat '$data/$id/brief.md')\"" \
+  assert_contains "$(cat "$log_new")" $'\x1f''-l'$'\x1f'"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false claude --dangerously-skip-permissions 'Read and follow the brief at '\\''$data/$id/brief.md'\\''.'" \
     "spawn tmux log missing the literal launch-command send"
 
   rm -rf "/tmp/fm-$id"
-  pass "fm-spawn.sh: tmux command log is byte-identical old vs new; printed summary carries the dispatch resource for a ship-task claude spawn"
+  pass "fm-spawn.sh: tmux operations stay byte-identical after normalizing the intentional brief transport delta"
 }
 
 # --- symlinked project prefix must not false-refuse the isolation guard -----
@@ -1052,6 +1071,7 @@ test_meta_get_and_backend_of_meta
 test_resolve_selector_three_forms
 test_backend_of_selector_matches_explicit_target_meta
 test_send_conformance_old_vs_new
+test_send_guard_refuses_long_argv
 test_peek_conformance_old_vs_new
 test_spawn_conformance_old_vs_new
 test_spawn_symlinked_project_prefix_avoids_false_refusal

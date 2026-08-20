@@ -268,6 +268,40 @@ test_escalate_batches_into_one_digest() {
   pass "multiple escalations flush as a single batched digest"
 }
 
+# Regression: the outbound argv guard must never be what decides an away-mode
+# escalation is undeliverable. An unbounded digest join started refusing once
+# enough events accumulated, and because the buffer is only cleared on a
+# confirmed inject, every later flush refused the same content forever - the
+# captain silently stopped hearing about problems while away.
+test_escalate_oversized_buffer_delivers_bounded_digest() {
+  local dir state fakebin sent capture msg budget i
+  dir=$(make_supercase oversized-digest)
+  state="$dir/state"
+  fakebin="$dir/fakebin"
+  sent="$dir/sent.log"; : > "$sent"
+  capture="$dir/pane.txt"; : > "$capture"
+  for i in $(seq 1 40); do
+    escalate_add "$state" "event $i: needs-decision: a realistically long distilled escalation item for task fm-oversized-$i"
+  done
+  afk_enter "$state"
+  PATH="$fakebin:$PATH" FM_FAKE_TMUX_PANE_ALIVE=1 FM_FAKE_TMUX_SENT="$sent" \
+    FM_FAKE_TMUX_CAPTURE="$capture" FM_ESCALATE_BATCH_SECS=0 escalate_flush "$state" \
+    || fail "oversized escalation buffer was refused instead of delivered bounded"
+  msg=$(grep -v '^\[ENTER\]$' "$sent" | tail -1)
+  budget=$(fm_backend_argv_entry_budget)
+  [ "$(fm_backend_argv_bytes "$msg")" -le "$budget" ] \
+    || fail "delivered digest is $(fm_backend_argv_bytes "$msg") bytes, above the $budget-byte argv budget"
+  grep -F 'event 40:' "$sent" >/dev/null || fail "bounded digest dropped the newest escalation"
+  grep -F 'earlier escalation(s), see ' "$sent" >/dev/null \
+    || fail "bounded digest did not point at the summarised remainder"
+  grep -F 'Supervisor escalate (40 event(s))' "$sent" >/dev/null \
+    || fail "bounded digest lost the true event count"
+  [ -s "$state/.subsuper-escalations" ] && fail "delivered items were not cleared from the buffer"
+  grep -F 'event 1:' "$state/.supervise-daemon.log" >/dev/null \
+    || fail "summarised items are not retrievable from the daemon log"
+  pass "an oversized escalation buffer delivers a bounded digest instead of wedging undelivered"
+}
+
 test_escalate_batch_age_uses_first_append() {
   local dir state fakebin sent capture
   dir=$(make_supercase batch-age)
@@ -981,6 +1015,7 @@ test_housekeeping_herdr_idle_busy_footer_clears_stale
 test_housekeeping_herdr_resumed_stale_cleared
 test_housekeeping_orca_persistent_stale_resolves_terminal
 test_escalate_batches_into_one_digest
+test_escalate_oversized_buffer_delivers_bounded_digest
 test_escalate_batch_age_uses_first_append
 test_heartbeat_scan_dedup
 test_handle_wake_routes_self_and_escalate

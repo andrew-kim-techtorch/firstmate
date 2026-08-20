@@ -735,16 +735,17 @@ EOF
 }
 
 sync_project_registry() {
-  local home=$1 sub_reg tmp project line today names
+  local home=$1 sub_reg tmp project line today names_file
   shift
   sub_reg="$home/data/projects.md"
   tmp="$sub_reg.tmp.$$"
-  names=$(printf '%s\n' "$@" | awk '{ printf "%s%s", sep, $0; sep="\034" }')
+  names_file=$(mktemp) || return 1
+  printf '%s\n' "$@" > "$names_file"
   if [ -f "$sub_reg" ]; then
-    awk -v names="$names" '
+    awk -v names_file="$names_file" '
       BEGIN {
-        split(names, a, "\034")
-        for (i in a) selected[a[i]]=1
+        while ((getline name < names_file) > 0) selected[name]=1
+        close(names_file)
       }
       !($1=="-" && ($2 in selected)) { print }
     ' "$sub_reg" > "$tmp"
@@ -759,6 +760,7 @@ sync_project_registry() {
     fi
     printf '%s\n' "$line" >> "$tmp"
   done
+  rm -f "$names_file"
   mv "$tmp" "$sub_reg"
 }
 
